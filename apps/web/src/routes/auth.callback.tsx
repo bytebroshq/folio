@@ -34,8 +34,8 @@ export const Route = createFileRoute("/auth/callback")({
         try {
           tokenResp = await exchangeOAuthCode(
             code,
-            env.GITHUB_CLIENT_ID as string,
-            env.GITHUB_CLIENT_SECRET as string,
+            env.GITHUB_CLIENT_ID,
+            env.GITHUB_CLIENT_SECRET,
             redirectUri,
           );
         } catch {

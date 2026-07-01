@@ -10,7 +10,7 @@ export const Route = createFileRoute("/login/github")({
         const returnTo = url.searchParams.get("return_to") || "/setup/repos";
 
         const redirectUri = `${url.origin}/auth/callback`;
-        const clientId = env.GITHUB_CLIENT_ID as string;
+        const clientId = env.GITHUB_CLIENT_ID;
         const state = crypto.randomUUID();
 
         await saveOAuthState(env.DB as D1Database, state, returnTo);

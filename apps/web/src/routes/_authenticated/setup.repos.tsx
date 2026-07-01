@@ -1,11 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getInstallations } from "#/server/functions";
-
-type Installation = {
-  id: string;
-  installation_id: number;
-  account_id: number | null;
-};
+import { getInstallations } from "#/server/installations.functions";
 
 export const Route = createFileRoute("/_authenticated/setup/repos")({
   loader: () => getInstallations(),
@@ -19,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/setup/repos")({
 });
 
 function SetupRepos() {
-  const installations = Route.useLoaderData() as Installation[];
+  const installations = Route.useLoaderData();
 
   if (installations.length === 0) {
     return (

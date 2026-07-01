@@ -8,7 +8,7 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 
 import appCss from "../styles.css?url";
-import { getSessionUserId } from "#/session";
+import { getSessionUserId } from "#/session.functions";
 
 export interface RouterContext {
   userId: string | null;

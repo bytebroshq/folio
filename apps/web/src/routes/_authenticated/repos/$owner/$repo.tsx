@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getRepoMeta } from "#/server/functions";
+import { getRepoMeta } from "#/server/installations.functions";
 
 type RepoMeta = {
   owner: string;

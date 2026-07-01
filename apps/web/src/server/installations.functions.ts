@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+import { env } from "cloudflare:workers";
+import { readSessionToken } from "#/server/session.server";
 
 type Installation = {
   id: string;
@@ -11,13 +13,10 @@ type Installation = {
  */
 export const getInstallations = createServerFn({ method: "GET" }).handler(
   async () => {
-    const { readSessionToken } = await import("#/server/session.server");
-    const { env } = await import("cloudflare:workers");
-
     const token = readSessionToken();
     if (!token) return [] as Installation[];
 
-    const db = env.DB as D1Database;
+    const db = env.DB;
     const session = await db
       .prepare(
         "SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?",

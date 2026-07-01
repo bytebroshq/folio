@@ -1,4 +1,7 @@
-import { createServerFn } from "@tanstack/react-start";
+/**
+ * D1 database utility functions for auth.
+ * These are client-safe — they receive D1Database as a parameter.
+ */
 
 export type UserRow = {
   id: string;
@@ -12,37 +15,6 @@ export type SessionRow = {
   user_id: string;
   expires_at: number;
 };
-
-/**
- * Resolve the current session from cookie.
- * Uses createServerFn so it works in both SSR and client contexts.
- */
-export const getSessionUserId = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const { readSessionToken } = await import("#/server/session.server");
-    const { env } = await import("cloudflare:workers");
-
-    const token = readSessionToken();
-    if (!token) return null;
-
-    const db = env.DB as D1Database;
-    const session = await db
-      .prepare(
-        "SELECT user_id, expires_at FROM sessions WHERE id = ? AND expires_at > ?",
-      )
-      .bind(token, Date.now())
-      .first<{ user_id: string; expires_at: number }>();
-
-    if (!session) return null;
-
-    const user = await db
-      .prepare("SELECT id FROM users WHERE id = ?")
-      .bind(session.user_id)
-      .first<{ id: string }>();
-
-    return user?.id ?? null;
-  },
-);
 
 /**
  * Create a new session for a user.
