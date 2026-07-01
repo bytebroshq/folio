@@ -1,0 +1,15 @@
+{
+  "name": "folio",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter @folio/web dev",
+    "deploy": "bun run --filter @folio/web deploy",
+    "types": "bun run --filter @folio/web types"
+  }
+}
