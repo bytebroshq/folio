@@ -1,9 +1,6 @@
 import "@tanstack/react-start/server-only";
 import { getRequestHeader, setResponseHeader } from "@tanstack/react-start/server";
 
-/**
- * Parse the session token from the current request's Cookie header.
- */
 export function readSessionToken(): string | null {
   const header = getRequestHeader("cookie");
   if (!header) return null;
@@ -15,30 +12,18 @@ export function readSessionToken(): string | null {
   return null;
 }
 
-/**
- * Set a session cookie on the response.
- */
 export function setSessionCookie(token: string): void {
   const ttl = Math.floor((7 * 24 * 60 * 60 * 1000) / 1000);
-  setResponseHeader(
-    "Set-Cookie",
-    [
-      "folio_sid=" + token,
-      "HttpOnly",
-      "Secure",
-      "SameSite=Lax",
-      "Path=/",
-      "Max-Age=" + ttl,
-    ].join("; "),
-  );
+  setResponseHeader("Set-Cookie", [
+    "folio_sid=" + token,
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+    "Path=/",
+    "Max-Age=" + ttl,
+  ].join("; "));
 }
 
-/**
- * Clear the session cookie.
- */
 export function clearSessionCookie(): void {
-  setResponseHeader(
-    "Set-Cookie",
-    "folio_sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-  );
+  setResponseHeader("Set-Cookie", "folio_sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
 }

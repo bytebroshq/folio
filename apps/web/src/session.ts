@@ -19,7 +19,7 @@ export type SessionRow = {
  */
 export const getSessionUserId = createServerFn({ method: "GET" }).handler(
   async () => {
-    const { readSessionToken } = await import("#/server/session");
+    const { readSessionToken } = await import("#/server/session.server");
     const { env } = await import("cloudflare:workers");
 
     const token = readSessionToken();

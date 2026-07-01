@@ -1,18 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "cloudflare:workers";
+import {
+  verifyOAuthState,
+  createSession,
+  upsertUser,
+  getOAuthReturnTo,
+} from "#/session";
+import { setSessionCookie } from "#/server/session.server";
 import { exchangeOAuthCode, fetchUser, fetchInstallations } from "@folio/github";
 
 export const Route = createFileRoute("/auth/callback")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const { env } = await import("cloudflare:workers");
-        const { setSessionCookie } = await import("#/server/session");
-        const {
-          verifyOAuthState,
-          createSession,
-          upsertUser,
-          getOAuthReturnTo,
-        } = await import("#/session");
         const url = new URL(request.url);
 
         const code = url.searchParams.get("code");

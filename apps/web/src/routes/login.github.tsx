@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "cloudflare:workers";
 import { saveOAuthState } from "#/session";
 
 export const Route = createFileRoute("/login/github")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const { env } = await import("cloudflare:workers");
         const url = new URL(request.url);
         const returnTo = url.searchParams.get("return_to") || "/setup/repos";
 

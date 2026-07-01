@@ -1,12 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "cloudflare:workers";
+import { clearSessionCookie, readSessionToken } from "#/server/session.server";
 
 export const Route = createFileRoute("/logout")({
   server: {
     handlers: {
       GET: async () => {
-        const { env } = await import("cloudflare:workers");
-        const { clearSessionCookie, readSessionToken } = await import("#/server/session");
-
         const token = readSessionToken();
         if (token) {
           await (env.DB as D1Database)
