@@ -5,6 +5,18 @@
  * Callers pass the necessary secrets and tokens explicitly.
  */
 
+// ── Shared headers ─────────────────────────────────────────────────
+
+function gitHubHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    "User-Agent": "folio-web",
+    Accept: "application/vnd.github+json",
+  };
+}
+
+// ── OAuth ──────────────────────────────────────────────────────────
+
 type GitHubTokenResponse = {
   access_token: string;
   token_type: string;
@@ -14,10 +26,6 @@ type GitHubTokenResponse = {
 type GitHubUser = {
   id: number;
   login: string;
-};
-
-type GitHubInstallationRepos = {
-  repositories: { full_name: string; private: boolean }[];
 };
 
 /**
@@ -33,7 +41,7 @@ export async function exchangeOAuthCode(
     "https://github.com/login/oauth/access_token",
     {
       method: "POST",
-      headers: { "Accept": "application/json" },
+      headers: { Accept: "application/json", "User-Agent": "folio-web" },
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
@@ -42,6 +50,7 @@ export async function exchangeOAuthCode(
       }),
     },
   );
+  if (!resp.ok) throw new Error(`OAuth token exchange failed: ${resp.status} ${await resp.text()}`);
   return resp.json<GitHubTokenResponse>();
 }
 
@@ -50,8 +59,9 @@ export async function exchangeOAuthCode(
  */
 export async function fetchUser(accessToken: string): Promise<GitHubUser> {
   const resp = await fetch("https://api.github.com/user", {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: gitHubHeaders(accessToken),
   });
+  if (!resp.ok) throw new Error(`fetchUser failed: ${resp.status} ${await resp.text()}`);
   return resp.json<GitHubUser>();
 }
 
@@ -63,8 +73,9 @@ export async function fetchInstallations(
   accessToken: string,
 ): Promise<{ id: number; account: { id: number; login: string } }[]> {
   const resp = await fetch("https://api.github.com/user/installations", {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: gitHubHeaders(accessToken),
   });
+  if (!resp.ok) return []; // user may not have any installations
   const data = await resp.json<{ installations: unknown[] }>();
   return (data.installations || []) as { id: number; account: { id: number; login: string } }[];
 }
@@ -80,15 +91,14 @@ export async function fetchInstallationRepos(
   const token = await mintInstallationToken(installationId, appId, privateKey);
   const resp = await fetch(
     `https://api.github.com/installation/repositories`,
-    { headers: { Authorization: `Bearer ${token}` } },
+    { headers: gitHubHeaders(token) },
   );
-  const data = await resp.json<GitHubInstallationRepos>();
+  const data = await resp.json<{ repositories: { full_name: string }[] }>();
   return (data.repositories || []).map((r) => r.full_name);
 }
 
 /**
  * Check whether an installation can reach a specific repo.
- * Returns the installation id if access is granted, null otherwise.
  */
 export async function checkRepoAccess(
   owner: string,
@@ -99,14 +109,13 @@ export async function checkRepoAccess(
 ): Promise<boolean> {
   const token = await mintInstallationToken(installationId, appId, privateKey);
   const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: gitHubHeaders(token),
   });
   return resp.ok;
 }
 
 /**
  * Mint an installation access token for the GitHub App.
- * Uses the app private key to authenticate as the GitHub App.
  */
 export async function mintInstallationToken(
   installationId: number,
@@ -118,36 +127,32 @@ export async function mintInstallationToken(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        Accept: "application/vnd.github+json",
-      },
+      headers: gitHubHeaders(jwt),
     },
   );
+  if (!resp.ok) throw new Error(`mintInstallationToken failed: ${resp.status} ${await resp.text()}`);
   const data = await resp.json<{ token: string }>();
   return data.token;
 }
+
+// ── App JWT signing ────────────────────────────────────────────────
 
 /**
  * Sign a short-lived JWT to authenticate as a GitHub App.
  * Uses RS256 with the app's private key.
  */
 async function signAppJwt(appId: string, privateKeyPem: string): Promise<string> {
-  // In Cloudflare Workers, we need Web Crypto API for RSA signing.
-  // The private key is a PEM string stored in Cloudflare Secrets.
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
 
-  // The jwt payload needs iat (issued at), exp (10 min max) and iss (app id)
   const payload = {
-    iat: now - 60, // 1 min leeway for clock drift
-    exp: now + 600, // 10 min max for GitHub
+    iat: now - 60,
+    exp: now + 600,
     iss: appId,
   };
 
   const encoder = new TextEncoder();
 
-  // Import the PEM key
   const pemHeader = "-----BEGIN RSA PRIVATE KEY-----";
   const pemFooter = "-----END RSA PRIVATE KEY-----";
   const pemContent = privateKeyPem
@@ -164,7 +169,6 @@ async function signAppJwt(appId: string, privateKeyPem: string): Promise<string>
     ["sign"],
   ) as CryptoKey;
 
-  // Encode header + payload
   const b64 = (obj: object) =>
     btoa(JSON.stringify(obj))
       .replace(/=/g, "")
@@ -172,7 +176,6 @@ async function signAppJwt(appId: string, privateKeyPem: string): Promise<string>
       .replace(/\//g, "_");
   const message = `${b64(header)}.${b64(payload)}`;
 
-  // Sign
   const signature = await crypto.subtle.sign(
     { name: "RSASSA-PKCS1-v1_5" } as any,
     key,
