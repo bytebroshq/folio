@@ -173,7 +173,7 @@ async function signAppJwt(
 	const key = (await crypto.subtle.importKey(
 		"pkcs8",
 		binaryDer.buffer,
-		{ name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" } as any,
+		{ name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
 		false,
 		["sign"],
 	)) as CryptoKey;
@@ -186,7 +186,7 @@ async function signAppJwt(
 	const message = `${b64(header)}.${b64(payload)}`;
 
 	const signature = await crypto.subtle.sign(
-		{ name: "RSASSA-PKCS1-v1_5" } as any,
+		{ name: "RSASSA-PKCS1-v1_5" },
 		key,
 		encoder.encode(message),
 	);

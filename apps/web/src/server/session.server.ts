@@ -20,12 +20,12 @@ export function setSessionCookie(token: string): void {
 	setResponseHeader(
 		"Set-Cookie",
 		[
-			"folio_sid=" + token,
+			`folio_sid=${token}`,
 			"HttpOnly",
 			"Secure",
 			"SameSite=Lax",
 			"Path=/",
-			"Max-Age=" + ttl,
+			`Max-Age=${ttl}`,
 		].join("; "),
 	);
 }

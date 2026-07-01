@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_authenticated")({
 			throw redirect({
 				to: "/login/github",
 				search: { return_to: location.pathname },
-			} as any);
+			});
 		}
 	},
 	component: Outlet,
