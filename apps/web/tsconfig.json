@@ -1,21 +1,28 @@
 {
+  "include": ["**/*.ts", "**/*.tsx"],
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "allowImportingTsExtensions": true,
-    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
     "paths": {
-      "@folio/core": ["../../packages/core/src"],
-      "@folio/github": ["../../packages/github/src"]
-    }
-  },
-  "include": ["src", "worker-configuration.d.ts"]
+      "#/*": ["./src/*"],
+      "@/*": ["./src/*"]
+    },
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  }
 }
