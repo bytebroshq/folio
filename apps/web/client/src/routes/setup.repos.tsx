@@ -1,6 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { api } from "../lib/api";
-import { useEffect, useState } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 type Installation = {
   id: string;
@@ -9,33 +7,27 @@ type Installation = {
 };
 
 export const Route = createFileRoute("/setup/repos")({
-  component: () => {
-    const [installs, setInstalls] = useState<Installation[] | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-      api("/api/installations")
-        .then((data) => setInstalls(data as Installation[]))
-        .catch((e) => {
-          if (e.message.includes("401")) {
-            window.location.href = "/login/github";
-            return;
-          }
-          setError(e.message);
-        })
-        .finally(() => setLoading(false));
-    }, []);
-
-    if (loading) {
-      return <p className="text-zinc-400">Loading...</p>;
+  beforeLoad: async ({ context }) => {
+    if (!context.userId) {
+      throw redirect({
+        to: "/login/github",
+        search: { return_to: "/setup/repos" },
+      } as any);
     }
-
-    if (error) {
-      return <p className="text-red-400">Error: {error}</p>;
-    }
-
-    if (!installs || installs.length === 0) {
+  },
+  loader: async () => {
+    const res = await fetch("/api/installations", { credentials: "include" });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return res.json() as Promise<Installation[]>;
+  },
+  errorComponent: ({ error }) => (
+    <p className="text-red-400">Error: {error.message}</p>
+  ),
+  pendingComponent: () => (
+    <p className="text-zinc-400">Loading...</p>
+  ),
+  component: ({ loaderData }) => {
+    if (loaderData.length === 0) {
       return (
         <div>
           <h2 className="text-xl font-semibold mb-4">Connected Repos</h2>
@@ -43,14 +35,7 @@ export const Route = createFileRoute("/setup/repos")({
             No GitHub App installations found.
           </p>
           <p className="text-zinc-500 text-sm">
-            <a
-              href="https://github.com/apps/folio-web-dev/installations/new"
-              className="text-blue-400 hover:underline"
-              target="_blank"
-            >
-              Install the Folio GitHub App
-            </a>{" "}
-            on your account, then{" "}
+            Install the Folio GitHub App on your account, then{" "}
             <a
               href="/login/github"
               className="text-blue-400 hover:underline"
@@ -67,7 +52,7 @@ export const Route = createFileRoute("/setup/repos")({
       <div>
         <h2 className="text-xl font-semibold mb-4">Connected Repos</h2>
         <ul className="space-y-2">
-          {installs.map((inst) => (
+          {loaderData.map((inst) => (
             <li
               key={inst.id}
               className="border border-zinc-800 rounded-lg p-3"
