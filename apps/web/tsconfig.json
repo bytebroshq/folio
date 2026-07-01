@@ -10,7 +10,12 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "allowImportingTsExtensions": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@folio/core": ["../../packages/core/src"],
+      "@folio/github": ["../../packages/github/src"]
+    }
   },
   "include": ["src", "worker-configuration.d.ts"]
 }
