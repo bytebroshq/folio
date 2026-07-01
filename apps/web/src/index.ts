@@ -140,8 +140,14 @@ app.get("/repos/:owner/:repo", async (c) => {
     return c.redirect(loginUrl);
   }
   const { owner, repo } = c.req.param();
-  // TODO: resolve installation, route to RepoObject
-  return c.text(`${owner}/${repo} — not yet implemented`, 501);
+  // Serve SPA — client-side router renders the repo page
+  const spa = await c.env.ASSETS.fetch(
+    new URL("/index.html", c.req.url),
+  );
+  return new Response(spa.body, {
+    status: spa.status,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
 });
 
 // ── API ──────────────────────────────────────────────────────────
@@ -163,6 +169,22 @@ app.get("/api/installations", async (c) => {
   ).bind(userId).all();
 
   return c.json(installs.results);
+});
+
+app.get("/api/repos/:owner/:repo/meta", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) return c.json({ error: "unauthorized" }, 401);
+
+  const { owner, repo } = c.req.param();
+
+  // Find an installation that can reach this repo
+  const installs = await c.env.DB.prepare(
+    "SELECT installation_id FROM installations WHERE user_id = ?",
+  ).bind(userId).all();
+
+  // TODO: probe each installation for this repo, cache in RepoObject
+  // For now return basic info
+  return c.json({ owner, repo, defaultBranch: "main" });
 });
 
 // ── SPA fallback ─────────────────────────────────────────────────
