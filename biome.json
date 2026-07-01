@@ -7,11 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": [
-			"**/src/**/*",
-			"apps/web/vite.config.ts",
-			"apps/web/client/vite.config.ts"
-		]
+		"includes": ["**/src/**/*", "apps/web/vite.config.ts"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -35,5 +31,19 @@
 				"organizeImports": "on"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/routeTree.gen.ts"],
+			"linter": {
+				"enabled": false
+			},
+			"formatter": {
+				"enabled": false
+			},
+			"assist": {
+				"enabled": false
+			}
+		}
+	]
 }
