@@ -8,197 +8,198 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as LogoutRouteImport } from './routes/logout'
-import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as LoginGithubRouteImport } from './routes/login.github'
-import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
-import { Route as AuthenticatedSetupReposRouteImport } from './routes/_authenticated/setup.repos'
-import { Route as AuthenticatedReposOwnerRepoRouteImport } from './routes/_authenticated/repos/$owner/$repo'
+import { Route as rootRouteImport } from "./routes/__root";
+import { Route as AuthenticatedRouteImport } from "./routes/_authenticated";
+import { Route as AuthenticatedReposOwnerRepoRouteImport } from "./routes/_authenticated/repos/$owner/$repo";
+import { Route as AuthenticatedSetupReposRouteImport } from "./routes/_authenticated/setup.repos";
+import { Route as AuthCallbackRouteImport } from "./routes/auth.callback";
+import { Route as IndexRouteImport } from "./routes/index";
+import { Route as LoginGithubRouteImport } from "./routes/login.github";
+import { Route as LogoutRouteImport } from "./routes/logout";
 
 const LogoutRoute = LogoutRouteImport.update({
-  id: '/logout',
-  path: '/logout',
-  getParentRoute: () => rootRouteImport,
-} as any)
+	id: "/logout",
+	path: "/logout",
+	getParentRoute: () => rootRouteImport,
+} as any);
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
+	id: "/_authenticated",
+	getParentRoute: () => rootRouteImport,
+} as any);
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
+	id: "/",
+	path: "/",
+	getParentRoute: () => rootRouteImport,
+} as any);
 const LoginGithubRoute = LoginGithubRouteImport.update({
-  id: '/login/github',
-  path: '/login/github',
-  getParentRoute: () => rootRouteImport,
-} as any)
+	id: "/login/github",
+	path: "/login/github",
+	getParentRoute: () => rootRouteImport,
+} as any);
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
-  id: '/auth/callback',
-  path: '/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
+	id: "/auth/callback",
+	path: "/auth/callback",
+	getParentRoute: () => rootRouteImport,
+} as any);
 const AuthenticatedSetupReposRoute = AuthenticatedSetupReposRouteImport.update({
-  id: '/setup/repos',
-  path: '/setup/repos',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
+	id: "/setup/repos",
+	path: "/setup/repos",
+	getParentRoute: () => AuthenticatedRoute,
+} as any);
 const AuthenticatedReposOwnerRepoRoute =
-  AuthenticatedReposOwnerRepoRouteImport.update({
-    id: '/repos/$owner/$repo',
-    path: '/repos/$owner/$repo',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
+	AuthenticatedReposOwnerRepoRouteImport.update({
+		id: "/repos/$owner/$repo",
+		path: "/repos/$owner/$repo",
+		getParentRoute: () => AuthenticatedRoute,
+	} as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/logout': typeof LogoutRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/login/github': typeof LoginGithubRoute
-  '/setup/repos': typeof AuthenticatedSetupReposRoute
-  '/repos/$owner/$repo': typeof AuthenticatedReposOwnerRepoRoute
+	"/": typeof IndexRoute;
+	"/logout": typeof LogoutRoute;
+	"/auth/callback": typeof AuthCallbackRoute;
+	"/login/github": typeof LoginGithubRoute;
+	"/setup/repos": typeof AuthenticatedSetupReposRoute;
+	"/repos/$owner/$repo": typeof AuthenticatedReposOwnerRepoRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/logout': typeof LogoutRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/login/github': typeof LoginGithubRoute
-  '/setup/repos': typeof AuthenticatedSetupReposRoute
-  '/repos/$owner/$repo': typeof AuthenticatedReposOwnerRepoRoute
+	"/": typeof IndexRoute;
+	"/logout": typeof LogoutRoute;
+	"/auth/callback": typeof AuthCallbackRoute;
+	"/login/github": typeof LoginGithubRoute;
+	"/setup/repos": typeof AuthenticatedSetupReposRoute;
+	"/repos/$owner/$repo": typeof AuthenticatedReposOwnerRepoRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/_authenticated': typeof AuthenticatedRouteWithChildren
-  '/logout': typeof LogoutRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/login/github': typeof LoginGithubRoute
-  '/_authenticated/setup/repos': typeof AuthenticatedSetupReposRoute
-  '/_authenticated/repos/$owner/$repo': typeof AuthenticatedReposOwnerRepoRoute
+	__root__: typeof rootRouteImport;
+	"/": typeof IndexRoute;
+	"/_authenticated": typeof AuthenticatedRouteWithChildren;
+	"/logout": typeof LogoutRoute;
+	"/auth/callback": typeof AuthCallbackRoute;
+	"/login/github": typeof LoginGithubRoute;
+	"/_authenticated/setup/repos": typeof AuthenticatedSetupReposRoute;
+	"/_authenticated/repos/$owner/$repo": typeof AuthenticatedReposOwnerRepoRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/logout'
-    | '/auth/callback'
-    | '/login/github'
-    | '/setup/repos'
-    | '/repos/$owner/$repo'
-  fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/logout'
-    | '/auth/callback'
-    | '/login/github'
-    | '/setup/repos'
-    | '/repos/$owner/$repo'
-  id:
-    | '__root__'
-    | '/'
-    | '/_authenticated'
-    | '/logout'
-    | '/auth/callback'
-    | '/login/github'
-    | '/_authenticated/setup/repos'
-    | '/_authenticated/repos/$owner/$repo'
-  fileRoutesById: FileRoutesById
+	fileRoutesByFullPath: FileRoutesByFullPath;
+	fullPaths:
+		| "/"
+		| "/logout"
+		| "/auth/callback"
+		| "/login/github"
+		| "/setup/repos"
+		| "/repos/$owner/$repo";
+	fileRoutesByTo: FileRoutesByTo;
+	to:
+		| "/"
+		| "/logout"
+		| "/auth/callback"
+		| "/login/github"
+		| "/setup/repos"
+		| "/repos/$owner/$repo";
+	id:
+		| "__root__"
+		| "/"
+		| "/_authenticated"
+		| "/logout"
+		| "/auth/callback"
+		| "/login/github"
+		| "/_authenticated/setup/repos"
+		| "/_authenticated/repos/$owner/$repo";
+	fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
-  LogoutRoute: typeof LogoutRoute
-  AuthCallbackRoute: typeof AuthCallbackRoute
-  LoginGithubRoute: typeof LoginGithubRoute
+	IndexRoute: typeof IndexRoute;
+	AuthenticatedRoute: typeof AuthenticatedRouteWithChildren;
+	LogoutRoute: typeof LogoutRoute;
+	AuthCallbackRoute: typeof AuthCallbackRoute;
+	LoginGithubRoute: typeof LoginGithubRoute;
 }
 
-declare module '@tanstack/react-router' {
-  interface FileRoutesByPath {
-    '/logout': {
-      id: '/logout'
-      path: '/logout'
-      fullPath: '/logout'
-      preLoaderRoute: typeof LogoutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login/github': {
-      id: '/login/github'
-      path: '/login/github'
-      fullPath: '/login/github'
-      preLoaderRoute: typeof LoginGithubRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth/callback': {
-      id: '/auth/callback'
-      path: '/auth/callback'
-      fullPath: '/auth/callback'
-      preLoaderRoute: typeof AuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/setup/repos': {
-      id: '/_authenticated/setup/repos'
-      path: '/setup/repos'
-      fullPath: '/setup/repos'
-      preLoaderRoute: typeof AuthenticatedSetupReposRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/repos/$owner/$repo': {
-      id: '/_authenticated/repos/$owner/$repo'
-      path: '/repos/$owner/$repo'
-      fullPath: '/repos/$owner/$repo'
-      preLoaderRoute: typeof AuthenticatedReposOwnerRepoRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-  }
+declare module "@tanstack/react-router" {
+	interface FileRoutesByPath {
+		"/logout": {
+			id: "/logout";
+			path: "/logout";
+			fullPath: "/logout";
+			preLoaderRoute: typeof LogoutRouteImport;
+			parentRoute: typeof rootRouteImport;
+		};
+		"/_authenticated": {
+			id: "/_authenticated";
+			path: "";
+			fullPath: "/";
+			preLoaderRoute: typeof AuthenticatedRouteImport;
+			parentRoute: typeof rootRouteImport;
+		};
+		"/": {
+			id: "/";
+			path: "/";
+			fullPath: "/";
+			preLoaderRoute: typeof IndexRouteImport;
+			parentRoute: typeof rootRouteImport;
+		};
+		"/login/github": {
+			id: "/login/github";
+			path: "/login/github";
+			fullPath: "/login/github";
+			preLoaderRoute: typeof LoginGithubRouteImport;
+			parentRoute: typeof rootRouteImport;
+		};
+		"/auth/callback": {
+			id: "/auth/callback";
+			path: "/auth/callback";
+			fullPath: "/auth/callback";
+			preLoaderRoute: typeof AuthCallbackRouteImport;
+			parentRoute: typeof rootRouteImport;
+		};
+		"/_authenticated/setup/repos": {
+			id: "/_authenticated/setup/repos";
+			path: "/setup/repos";
+			fullPath: "/setup/repos";
+			preLoaderRoute: typeof AuthenticatedSetupReposRouteImport;
+			parentRoute: typeof AuthenticatedRoute;
+		};
+		"/_authenticated/repos/$owner/$repo": {
+			id: "/_authenticated/repos/$owner/$repo";
+			path: "/repos/$owner/$repo";
+			fullPath: "/repos/$owner/$repo";
+			preLoaderRoute: typeof AuthenticatedReposOwnerRepoRouteImport;
+			parentRoute: typeof AuthenticatedRoute;
+		};
+	}
 }
 
 interface AuthenticatedRouteChildren {
-  AuthenticatedSetupReposRoute: typeof AuthenticatedSetupReposRoute
-  AuthenticatedReposOwnerRepoRoute: typeof AuthenticatedReposOwnerRepoRoute
+	AuthenticatedSetupReposRoute: typeof AuthenticatedSetupReposRoute;
+	AuthenticatedReposOwnerRepoRoute: typeof AuthenticatedReposOwnerRepoRoute;
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
-  AuthenticatedSetupReposRoute: AuthenticatedSetupReposRoute,
-  AuthenticatedReposOwnerRepoRoute: AuthenticatedReposOwnerRepoRoute,
-}
+	AuthenticatedSetupReposRoute: AuthenticatedSetupReposRoute,
+	AuthenticatedReposOwnerRepoRoute: AuthenticatedReposOwnerRepoRoute,
+};
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
-  AuthenticatedRouteChildren,
-)
+	AuthenticatedRouteChildren,
+);
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AuthenticatedRoute: AuthenticatedRouteWithChildren,
-  LogoutRoute: LogoutRoute,
-  AuthCallbackRoute: AuthCallbackRoute,
-  LoginGithubRoute: LoginGithubRoute,
-}
+	IndexRoute: IndexRoute,
+	AuthenticatedRoute: AuthenticatedRouteWithChildren,
+	LogoutRoute: LogoutRoute,
+	AuthCallbackRoute: AuthCallbackRoute,
+	LoginGithubRoute: LoginGithubRoute,
+};
 export const routeTree = rootRouteImport
-  ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+	._addFileChildren(rootRouteChildren)
+	._addFileTypes<FileRouteTypes>();
 
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
+import type { createStart } from "@tanstack/react-start";
+import type { getRouter } from "./router.tsx";
+
+declare module "@tanstack/react-start" {
+	interface Register {
+		ssr: true;
+		router: Awaited<ReturnType<typeof getRouter>>;
+	}
 }

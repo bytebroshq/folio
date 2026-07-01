@@ -1,47 +1,45 @@
-import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
+import { createServerFn } from "@tanstack/react-start";
 import { readSessionToken } from "#/server/session.server";
 
 type Installation = {
-  id: string;
-  installation_id: number;
-  account_id: number | null;
+	id: string;
+	installation_id: number;
+	account_id: number | null;
 };
 
 /**
  * Fetch installations for the current user.
  */
 export const getInstallations = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const token = readSessionToken();
-    if (!token) return [] as Installation[];
+	async () => {
+		const token = readSessionToken();
+		if (!token) return [] as Installation[];
 
-    const db = env.DB;
-    const session = await db
-      .prepare(
-        "SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?",
-      )
-      .bind(token, Date.now())
-      .first<{ user_id: string }>();
+		const db = env.DB;
+		const session = await db
+			.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?")
+			.bind(token, Date.now())
+			.first<{ user_id: string }>();
 
-    if (!session) return [] as Installation[];
+		if (!session) return [] as Installation[];
 
-    const installs = await db
-      .prepare(
-        "SELECT id, installation_id, account_id FROM installations WHERE user_id = ?",
-      )
-      .bind(session.user_id)
-      .all();
+		const installs = await db
+			.prepare(
+				"SELECT id, installation_id, account_id FROM installations WHERE user_id = ?",
+			)
+			.bind(session.user_id)
+			.all();
 
-    return installs.results as Installation[];
-  },
+		return installs.results as Installation[];
+	},
 );
 
 /**
  * Fetch basic repo metadata (placeholder).
  */
 export const getRepoMeta = createServerFn({ method: "GET" }).handler(
-  async () => {
-    return { defaultBranch: "main" };
-  },
+	async () => {
+		return { defaultBranch: "main" };
+	},
 );
