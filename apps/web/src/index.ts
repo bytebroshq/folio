@@ -8,6 +8,7 @@ import {
   upsertUser,
   saveOAuthState,
   verifyOAuthState,
+  getOAuthReturnTo,
 } from "./session";
 import {
   exchangeOAuthCode,
@@ -112,7 +113,11 @@ app.get("/auth/callback", async (c) => {
     }
   }
 
-  return c.redirect("/setup/repos");
+  // Where to return after login
+  const oauthReturnTo = await getOAuthReturnTo(c.env.DB, state);
+  const returnTo = oauthReturnTo || "/setup/repos";
+
+  return c.redirect(returnTo);
 });
 
 app.get("/logout", async (c) => {
@@ -124,6 +129,19 @@ app.get("/logout", async (c) => {
   }
   clearSessionCookie(c);
   return c.redirect("/");
+});
+
+// ── Repo (gated entry point) ─────────────────────────────────────
+
+app.get("/repos/:owner/:repo", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    const loginUrl = `/login/github?return_to=${encodeURIComponent(new URL(c.req.url).pathname)}`;
+    return c.redirect(loginUrl);
+  }
+  const { owner, repo } = c.req.param();
+  // TODO: resolve installation, route to RepoObject
+  return c.text(`${owner}/${repo} — not yet implemented`, 501);
 });
 
 // ── API ──────────────────────────────────────────────────────────

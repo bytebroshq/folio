@@ -110,11 +110,12 @@ export async function upsertUser(
 export async function saveOAuthState(
   db: D1Database,
   state: string,
+  returnTo?: string,
 ): Promise<void> {
   await db.prepare(
     "INSERT INTO oauth_states (state, code_verifier, return_to, expires_at) VALUES (?, ?, ?, ?)",
   )
-    .bind(state, crypto.randomUUID(), null, Date.now() + 10 * 60 * 1000)
+    .bind(state, crypto.randomUUID(), returnTo || null, Date.now() + 10 * 60 * 1000)
     .run();
 }
 
@@ -130,7 +131,22 @@ export async function verifyOAuthState(
 
   if (!row) return false;
 
-  // Delete the used state (one-time use)
   await db.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
   return true;
+}
+
+/**
+ * Get the return_to URL stored with an OAuth state.
+ */
+export async function getOAuthReturnTo(
+  db: D1Database,
+  state: string,
+): Promise<string | null> {
+  const row = await db.prepare(
+    "SELECT return_to FROM oauth_states WHERE state = ?",
+  )
+    .bind(state)
+    .first<{ return_to: string | null }>();
+
+  return row?.return_to ?? null;
 }
