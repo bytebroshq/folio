@@ -80,28 +80,17 @@ export async function saveOAuthState(
 export async function verifyOAuthState(
 	db: D1Database,
 	state: string,
-): Promise<boolean> {
+): Promise<{ valid: boolean; returnTo: string | null }> {
 	const row = await db
 		.prepare(
-			"SELECT expires_at FROM oauth_states WHERE state = ? AND expires_at > ?",
+			"SELECT return_to FROM oauth_states WHERE state = ? AND expires_at > ?",
 		)
 		.bind(state, Date.now())
-		.first<{ expires_at: number }>();
-	if (!row) return false;
+		.first<{ return_to: string | null }>();
+	if (!row) return { valid: false, returnTo: null };
 	await db
 		.prepare("DELETE FROM oauth_states WHERE state = ?")
 		.bind(state)
 		.run();
-	return true;
-}
-
-export async function getOAuthReturnTo(
-	db: D1Database,
-	state: string,
-): Promise<string | null> {
-	const row = await db
-		.prepare("SELECT return_to FROM oauth_states WHERE state = ?")
-		.bind(state)
-		.first<{ return_to: string | null }>();
-	return row?.return_to ?? null;
+	return { valid: true, returnTo: row.return_to };
 }

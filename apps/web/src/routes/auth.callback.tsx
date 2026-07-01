@@ -6,12 +6,7 @@ import {
 } from "@folio/github";
 import { createFileRoute } from "@tanstack/react-router";
 import { setSessionCookie } from "#/server/session.server";
-import {
-	createSession,
-	getOAuthReturnTo,
-	upsertUser,
-	verifyOAuthState,
-} from "#/session";
+import { createSession, upsertUser, verifyOAuthState } from "#/session";
 
 export const Route = createFileRoute("/auth/callback")({
 	server: {
@@ -26,7 +21,10 @@ export const Route = createFileRoute("/auth/callback")({
 				}
 
 				const db = env.DB as D1Database;
-				const valid = await verifyOAuthState(db, state);
+				const { valid, returnTo: oauthReturnTo } = await verifyOAuthState(
+					db,
+					state,
+				);
 				if (!valid) {
 					return new Response("invalid or expired state", { status: 403 });
 				}
@@ -86,7 +84,7 @@ export const Route = createFileRoute("/auth/callback")({
 					// non-fatal
 				}
 
-				const returnTo = (await getOAuthReturnTo(db, state)) || "/setup/repos";
+				const returnTo = oauthReturnTo || "/setup/repos";
 
 				return new Response(null, {
 					status: 302,

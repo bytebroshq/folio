@@ -1,0 +1,17 @@
+{
+	"name": "@folio/cli",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"folio": "src/index.ts"
+	},
+	"main": "src/index.ts",
+	"types": "src/index.d.ts",
+	"dependencies": {
+		"@folio/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^26.1.0"
+	}
+}
