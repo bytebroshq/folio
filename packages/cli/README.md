@@ -12,33 +12,21 @@ Part of the [bytebroshq/folio](https://github.com/bytebroshq/folio) monorepo. Re
 
 ## Install
 
-### Via Bun (recommended)
+### curl | bash (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+```
+
+This installs [Bun](https://bun.sh) (if missing), clones the repo, and builds a standalone binary at `~/.config/folio/bin/folio`. Adds the directory to PATH in your shell rc.
+
+### Via Bun (dev)
 
 ```bash
 cd packages/cli
-bun link
+bun install
+# create a wrapper: echo 'exec bun run "$PWD/src/index.ts" "$@"' > ~/.config/folio/bin/folio
 ```
-
-Makes `folio` available globally. Run `bun link` again after pulling changes.
-
-### Via npm
-
-```bash
-cd packages/cli
-npm link
-```
-
-### Direct wrapper (temporary)
-
-If you already have the bash `folio` on PATH, the setup script installs a wrapper to `~/.config/folio/bin/folio`:
-
-```bash
-cd packages/cli
-cp ../../scripts/cli-install.sh  # TODO
-# Or: exec bun run src/index.ts "$@"
-```
-
-See the [global wrapper in `~/.config/folio/bin/folio`](../../../.config/folio/bin/folio) for an example.
 
 ## Commands
 
