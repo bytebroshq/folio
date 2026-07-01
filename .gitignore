@@ -1,6 +1,7 @@
 .wrangler/
 node_modules/
 dist/
+client/dist/
 .dev.vars
 wrangler.toml
 *.log

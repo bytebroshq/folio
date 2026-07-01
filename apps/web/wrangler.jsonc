@@ -3,6 +3,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "client/dist",
+    "binding": "ASSETS"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "REPO_DO", "class_name": "RepoObject" }

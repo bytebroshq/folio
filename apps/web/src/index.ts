@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { RepoObject } from "./repo-object";
-import type { Context } from "hono";
 import {
   setSessionCookie,
   clearSessionCookie,
@@ -19,6 +18,7 @@ import {
 type Bindings = {
   DB: D1Database;
   REPO_DO: DurableObjectNamespace<RepoObject>;
+  ASSETS: Fetcher;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GITHUB_APP_ID: string;
@@ -39,7 +39,7 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-// ── Auth ──────────────────────────────────────────────────────────
+// ── Auth (server-side only, no SPA involvement) ──────────────────
 
 app.get("/login/github", async (c) => {
   const redirectUri = `${new URL(c.req.url).origin}/auth/callback`;
@@ -67,7 +67,6 @@ app.get("/auth/callback", async (c) => {
 
   const redirectUri = `${new URL(c.req.url).origin}/auth/callback`;
 
-  // Exchange code for access token
   let tokenResp: { access_token: string };
   try {
     tokenResp = await exchangeOAuthCode(
@@ -80,7 +79,6 @@ app.get("/auth/callback", async (c) => {
     return c.text("failed to exchange code", 502);
   }
 
-  // Fetch GitHub user identity
   let githubUser: { id: number; login: string };
   try {
     githubUser = await fetchUser(tokenResp.access_token);
@@ -88,22 +86,17 @@ app.get("/auth/callback", async (c) => {
     return c.text("failed to fetch user", 502);
   }
 
-  // Upsert user in our database
   const userId = await upsertUser(c.env.DB, githubUser.id);
-
-  // Create session
   const sessionId = await createSession(c.env.DB, userId);
   setSessionCookie(c, sessionId);
 
-  // Discover installations while we have the token
   let installations: { id: number; account: { id: number; login: string } }[] = [];
   try {
     installations = await fetchInstallations(tokenResp.access_token);
   } catch {
-    // non-fatal — can rediscover later
+    // non-fatal
   }
 
-  // Store installations that the user can access
   for (const inst of installations) {
     const existing = await c.env.DB.prepare(
       "SELECT id FROM installations WHERE user_id = ? AND installation_id = ?",
@@ -119,7 +112,6 @@ app.get("/auth/callback", async (c) => {
     }
   }
 
-  // Redirect to repo setup
   return c.redirect("/setup/repos");
 });
 
@@ -134,43 +126,60 @@ app.get("/logout", async (c) => {
   return c.redirect("/");
 });
 
-// ── Setup ─────────────────────────────────────────────────────────
+// ── API ──────────────────────────────────────────────────────────
 
-app.get("/setup/repos", async (c) => {
+app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+app.get("/api/user", async (c) => {
   const userId = c.get("userId");
-  if (!userId) return c.redirect("/login/github");
+  if (!userId) return c.json({ userId: null });
+  return c.json({ userId });
+});
+
+app.get("/api/installations", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) return c.json({ error: "unauthorized" }, 401);
 
   const installs = await c.env.DB.prepare(
     "SELECT id, installation_id, account_id FROM installations WHERE user_id = ?",
   ).bind(userId).all();
 
-  let repoLinks: string[] = [];
-
-  for (const inst of installs.results) {
-    // TODO: fetch repos per installation via GitHub API
-    repoLinks.push(`/installations/${inst.installation_id}`);
-  }
-
-  return c.html(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Folio — Repos</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-body{font:14px/1.45 system-ui,sans-serif;background:#111;color:#eee;margin:32px}
-a{color:#80c7ff}
-</style>
-</head><body>
-<h1>Folio</h1>
-<p>Connected installations: ${installs.results.length}</p>
-<ul>${repoLinks.map((r) => `<li><a href="${r}">${r}</a></li>`).join("")}</ul>
-<p><a href="/logout">Log out</a></p>
-</body></html>`);
+  return c.json(installs.results);
 });
 
-// ── Health ────────────────────────────────────────────────────────
+// ── SPA fallback ─────────────────────────────────────────────────
 
-app.get("/", (c) => c.text("folio web"));
+app.get("/setup/*", async (c) => {
+  const spa = await c.env.ASSETS.fetch(
+    new URL("/index.html", c.req.url),
+  );
+  return new Response(spa.body, {
+    status: spa.status,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
 
-app.get("/api/health", (c) => c.json({ status: "ok" }));
+app.get("/repos/*", async (c) => {
+  const spa = await c.env.ASSETS.fetch(
+    new URL("/index.html", c.req.url),
+  );
+  return new Response(spa.body, {
+    status: spa.status,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+
+// ── Root ─────────────────────────────────────────────────────────
+
+app.get("/", async (c) => {
+  const spa = await c.env.ASSETS.fetch(
+    new URL("/index.html", c.req.url),
+  );
+  return new Response(spa.body, {
+    status: spa.status,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
 
 export default app;
 export { RepoObject };
