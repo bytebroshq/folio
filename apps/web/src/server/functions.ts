@@ -11,7 +11,7 @@ type Installation = {
  */
 export const getInstallations = createServerFn({ method: "GET" }).handler(
   async () => {
-    const { readSessionToken } = await import("#/session.server");
+    const { readSessionToken } = await import("#/server/session");
     const { env } = await import("cloudflare:workers");
 
     const token = readSessionToken();

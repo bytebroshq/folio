@@ -1,8 +1,8 @@
+import "@tanstack/react-start/server-only";
 import { getRequestHeader, setResponseHeader } from "@tanstack/react-start/server";
 
 /**
  * Parse the session token from the current request's Cookie header.
- * Server-only — import this from .server.ts or createServerFn handlers.
  */
 export function readSessionToken(): string | null {
   const header = getRequestHeader("cookie");

@@ -6,7 +6,7 @@ export const Route = createFileRoute("/auth/callback")({
     handlers: {
       GET: async ({ request }) => {
         const { env } = await import("cloudflare:workers");
-        const { setSessionCookie } = await import("#/session.server");
+        const { setSessionCookie } = await import("#/server/session");
         const {
           verifyOAuthState,
           createSession,

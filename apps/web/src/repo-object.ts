@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import { DurableObject } from "cloudflare:workers";
 
 export interface DoEnv {

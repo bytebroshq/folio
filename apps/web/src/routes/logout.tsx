@@ -5,9 +5,7 @@ export const Route = createFileRoute("/logout")({
     handlers: {
       GET: async () => {
         const { env } = await import("cloudflare:workers");
-        const { clearSessionCookie, readSessionToken } = await import(
-          "#/session.server"
-        );
+        const { clearSessionCookie, readSessionToken } = await import("#/server/session");
 
         const token = readSessionToken();
         if (token) {

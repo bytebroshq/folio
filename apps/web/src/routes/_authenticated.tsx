@@ -5,11 +5,11 @@ import { createFileRoute, redirect, Outlet } from "@tanstack/react-router";
  * Any route inside `_authenticated/` is protected.
  */
 export const Route = createFileRoute("/_authenticated")({
-  beforeLoad: ({ context }) => {
+  beforeLoad: ({ context, location }) => {
     if (!context.userId) {
       throw redirect({
         to: "/login/github",
-        search: { return_to: typeof window !== "undefined" ? window.location.pathname : "/" },
+        search: { return_to: location.pathname },
       } as any);
     }
   },
