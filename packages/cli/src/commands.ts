@@ -27,7 +27,7 @@ import {
 	run,
 	worktreeExists,
 } from "./git";
-import { lint, printLintResult } from "./lint";
+import { hasLintErrors, lint, printLintResult } from "./lint";
 import { openBrowser } from "./open";
 
 // ── Formatting helpers ──────────────────────────────────────────────
@@ -710,6 +710,11 @@ export function cmdLint(args: string[]): void {
 
 	const json = args.includes("--json");
 	const strict = args.includes("--strict");
+	const specIdx = args.indexOf("--spec");
+	const spec = specIdx >= 0 ? args[specIdx + 1] : "folio";
+	if (specIdx >= 0 && !spec) {
+		throw new Error("Usage: folio lint [--spec folio] [--json] [--strict]");
+	}
 
 	const active = getActive();
 	let storeDir: string;
@@ -722,7 +727,7 @@ export function cmdLint(args: string[]): void {
 		throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
 	}
 
-	const result = lint(storeDir);
+	const result = lint(storeDir, { spec });
 
 	if (json) {
 		console.log(JSON.stringify(result, null, 2));
@@ -730,7 +735,7 @@ export function cmdLint(args: string[]): void {
 		printLintResult(result);
 	}
 
-	if (strict && result.issues.length > 0) {
+	if (strict && hasLintErrors(result)) {
 		process.exit(1);
 	}
 }
