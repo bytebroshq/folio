@@ -46,7 +46,7 @@ semantic types, relationship vocabularies, or a central schema registry.
 - **Schema** — The root `SCHEMA.md` file. Authored convention notes for the
   folio.
 - **Link** — A bracket link from one leaf to another, commonly called a
-  wikilink. Example: `[[folio-roadmap]]` or `[[folio-roadmap|Roadmap]]`.
+  wikilink. Example: `[[project-roadmap]]` or `[[project-roadmap|Roadmap]]`.
 
 ---
 
@@ -185,9 +185,9 @@ when they are useful.
 Leaf filenames are kebab-case.
 
 ```text
-folio-roadmap.md
-lituus-projects.md
-patterns-tailwind-v4-cascade.md
+project-roadmap.md
+team-projects.md
+patterns-css-cascade.md
 ```
 
 Prefix names to avoid collisions:
@@ -205,14 +205,14 @@ patterns-    # Reusable implementation patterns
 Folio links use bracket-link syntax, commonly called "wikilinks".
 
 ```md
-See [[folio-roadmap]].
-See [[lituus-projects|Lituus projects]].
+See [[project-roadmap]].
+See [[team-projects|Team projects]].
 ```
 
 For root leaves, the target is the filename without `.md`.
 
 ```text
-[[folio-roadmap]] → folio-roadmap.md
+[[project-roadmap]] → project-roadmap.md
 ```
 
 For nested leaves, the target MAY include a folio-root-relative path without
@@ -240,7 +240,7 @@ Broken links are structural issues. Traversal outside the folio can cause issues
 Use Markdown links for external URLs.
 
 ```md
-[GitHub](https://github.com/)
+[Example](https://example.com/)
 ```
 
 DO NOT use Markdown links for folio leaf relationships. Use bracket links instead.
@@ -262,14 +262,14 @@ An index SHOULD group leaves by useful headings:
 ```md
 # Index
 
-## Folio
+## Projects
 
-- [[folio-about]] — product identity and principles
-- [[folio-roadmap]] — product build path
+- [[project-about]] — product identity and principles
+- [[project-roadmap]] — product build path
 
 ## Patterns
 
-- [[patterns-tailwind-v4-cascade]] — Tailwind v4 cascade notes
+- [[patterns-css-cascade]] — CSS cascade notes
 ```
 
 A leaf SHOULD appear in `INDEX.md` unless there is a deliberate reason to hide
