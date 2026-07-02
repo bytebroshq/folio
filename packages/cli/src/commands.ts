@@ -191,7 +191,7 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 			);
 			if (rebase.exitCode !== 0) {
 				throw new Error(
-					`Rebase conflict in ${slug}. Resolve in ${path}/leaves/ then re-run 'folio sync'.`,
+					`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`,
 				);
 			}
 			run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
@@ -225,7 +225,7 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 
 	setActive(slug);
 	console.log(`✓ Amendment '${slug}' created.`);
-	console.log(`  leaves: ${path}/leaves/`);
+	console.log(`  store: ${path}/`);
 }
 
 function cmdSwitchTo(topic: string): void {
@@ -263,7 +263,7 @@ function cmdSwitchTo(topic: string): void {
 	);
 	if (rebase.exitCode !== 0) {
 		throw new Error(
-			`Rebase conflict in ${slug}. Resolve in ${path}/leaves/ then re-run 'folio sync'.`,
+			`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`,
 		);
 	}
 
@@ -305,17 +305,15 @@ export function cmdSync(args: string[]): void {
 		// Check for uncommitted changes
 		const hasChanges =
 			run(
-				`git -C "${BASE_REPO}" diff --quiet -- leaves/ 2>/dev/null || echo dirty`,
+				`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "" ||
 			run(
-				`git -C "${BASE_REPO}" diff --cached --quiet -- leaves/ 2>/dev/null || echo dirty`,
+				`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "";
 		if (hasChanges) {
-			console.log(
-				"  (uncommitted edits in store/leaves/ — did you mean to amend?)",
-			);
+			console.log("  (uncommitted edits in store — did you mean to amend?)");
 		}
 
 		console.log("✓ on main, synced.");
@@ -531,23 +529,18 @@ export function cmdStatus(): void {
 	if (!active) {
 		console.log("on main — no open amendments.");
 
-		// Check if main checkout leaves are dirty
-		const leavesDir = `${BASE_REPO}/leaves`;
-		if (existsSync(leavesDir)) {
-			const dirty =
-				run(
-					`git -C "${BASE_REPO}" diff --quiet -- leaves/ 2>/dev/null || echo dirty`,
-					{ quiet: true },
-				).stdout !== "" ||
-				run(
-					`git -C "${BASE_REPO}" diff --cached --quiet -- leaves/ 2>/dev/null || echo dirty`,
-					{ quiet: true },
-				).stdout !== "";
-			if (dirty) {
-				console.log(
-					"  (uncommitted edits in store/leaves/ — did you mean to amend?)",
-				);
-			}
+		// Check if main checkout Markdown content is dirty
+		const dirty =
+			run(
+				`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				{ quiet: true },
+			).stdout !== "" ||
+			run(
+				`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				{ quiet: true },
+			).stdout !== "";
+		if (dirty) {
+			console.log("  (uncommitted edits in store — did you mean to amend?)");
 		}
 
 		const remoteBound = readConfig("remote");
@@ -719,17 +712,17 @@ export function cmdLint(args: string[]): void {
 	const strict = args.includes("--strict");
 
 	const active = getActive();
-	let leavesDir: string;
+	let storeDir: string;
 
-	if (active && existsSync(`${AMEND_DIR}/${active}/leaves`)) {
-		leavesDir = `${AMEND_DIR}/${active}/leaves`;
+	if (active && existsSync(`${AMEND_DIR}/${active}`)) {
+		storeDir = `${AMEND_DIR}/${active}`;
 	} else if (mainExists()) {
-		leavesDir = `${BASE_REPO}/leaves`;
+		storeDir = BASE_REPO;
 	} else {
 		throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
 	}
 
-	const result = lint(leavesDir);
+	const result = lint(storeDir);
 
 	if (json) {
 		console.log(JSON.stringify(result, null, 2));

@@ -43,7 +43,7 @@ Usage:
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any issues
 
-Edits go in ~/.config/folio/stores/amendments/<topic>/leaves/.
+Edits go in ~/.config/folio/stores/amendments/<topic>/.
 folio sync opens a draft PR; merge via folio web.
 `);
 	process.exit(0);

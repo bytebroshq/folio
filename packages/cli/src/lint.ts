@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -19,6 +19,12 @@ export interface LintResult {
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 const DEFAULT_TOKEN_WARN = 10_000; // ~40 KB of English text
+const STRUCTURAL_FILES = new Set([
+	"INDEX.md",
+	"SCHEMA.md",
+	"AGENTS.md",
+	"README.md",
+]);
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -28,6 +34,7 @@ function walkMdFiles(dir: string): string[] {
 	if (!s?.isDirectory()) return results;
 
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (entry.name === ".git" || entry.name.startsWith(".")) continue;
 		const full = join(dir, entry.name);
 		if (entry.isDirectory()) {
 			results.push(...walkMdFiles(full));
@@ -38,11 +45,26 @@ function walkMdFiles(dir: string): string[] {
 	return results;
 }
 
+function rootMdFiles(storeDir: string): string[] {
+	const results: string[] = [];
+	for (const entry of readdirSync(storeDir, { withFileTypes: true })) {
+		if (entry.isFile() && entry.name.endsWith(".md")) {
+			results.push(join(storeDir, entry.name));
+		}
+	}
+	return results.sort();
+}
+
+function contentLeafFiles(storeDir: string): string[] {
+	return rootMdFiles(storeDir).filter(
+		(file) => !STRUCTURAL_FILES.has(basename(file)),
+	);
+}
+
 function extractWikilinks(content: string): { link: string; line: number }[] {
 	const results: { link: string; line: number }[] = [];
 	const lines = content.split("\n");
 	for (let i = 0; i < lines.length; i++) {
-		WIKILINK_RE.lastIndex = 0;
 		for (const match of lines[i].matchAll(WIKILINK_RE)) {
 			results.push({ link: match[1].trim(), line: i + 1 });
 		}
@@ -50,19 +72,9 @@ function extractWikilinks(content: string): { link: string; line: number }[] {
 	return results;
 }
 
-function resolveLinkTarget(
-	_leavesDir: string,
-	sourceFile: string,
-	link: string,
-): string {
-	const clean = link.replace(/#.*$/, ""); // strip fragments
-	// All wikilinks resolve relative to the source file's directory
-	// [[roadmap]] from folio/about.md → folio/roadmap.md
-	// [[people/jubal]] from root → people/jubal.md
-	// [[../workspace/os]] from folio/about.md → workspace/os.md
-	let target = resolve(dirname(sourceFile), clean);
-	if (!target.endsWith(".md")) target += ".md";
-	return target;
+function targetPath(storeDir: string, link: string): string {
+	const clean = link.replace(/#.*$/, "");
+	return resolve(storeDir, clean.endsWith(".md") ? clean : `${clean}.md`);
 }
 
 function exists(p: string): boolean {
@@ -75,21 +87,71 @@ function fmtBytes(n: number): string {
 	return `${(n / 1048576).toFixed(1)}MB`;
 }
 
+function isPathLink(link: string): boolean {
+	const clean = link.replace(/#.*$/, "");
+	return clean.includes("/") || clean.startsWith(".") || clean.startsWith("~");
+}
+
+// ── Check: store structure ─────────────────────────────────────────
+
+function structureIssues(storeDir: string, allFiles: string[]): LintIssue[] {
+	const issues: LintIssue[] = [];
+
+	if (!exists(join(storeDir, "INDEX.md"))) {
+		issues.push({
+			check: "structure",
+			file: "INDEX.md",
+			message: "missing required root INDEX.md",
+		});
+	}
+
+	if (!exists(join(storeDir, "SCHEMA.md"))) {
+		issues.push({
+			check: "structure",
+			file: "SCHEMA.md",
+			message: "missing required root SCHEMA.md",
+		});
+	}
+
+	for (const file of allFiles) {
+		const rel = relative(storeDir, file);
+		if (rel.includes("/")) {
+			issues.push({
+				check: "structure",
+				file: rel,
+				message:
+					"nested Markdown file; Folio leaves must be flat at store root",
+			});
+		}
+	}
+
+	return issues;
+}
+
 // ── Check: broken wikilinks (non-INDEX files) ─────────────────────
 
-function brokenLinks(leavesDir: string, files: string[]): LintIssue[] {
+function brokenLinks(storeDir: string, files: string[]): LintIssue[] {
 	const issues: LintIssue[] = [];
 	for (const file of files) {
 		if (basename(file) === "INDEX.md") continue;
 		const content = readFileSync(file, "utf-8");
 		for (const { link, line } of extractWikilinks(content)) {
-			const target = resolveLinkTarget(leavesDir, file, link);
+			if (isPathLink(link)) {
+				issues.push({
+					check: "path-link",
+					file: relative(storeDir, file),
+					line,
+					message: `[[${link}]] uses a path; use bare flat name`,
+				});
+				continue;
+			}
+			const target = targetPath(storeDir, link);
 			if (!exists(target)) {
 				issues.push({
 					check: "broken-link",
-					file: relative(leavesDir, file),
+					file: relative(storeDir, file),
 					line,
-					message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`,
+					message: `[[${link}]] → ${relative(storeDir, target)} does not exist`,
 				});
 			}
 		}
@@ -99,22 +161,30 @@ function brokenLinks(leavesDir: string, files: string[]): LintIssue[] {
 
 // ── Check: stale INDEX entries ────────────────────────────────────
 
-function staleIndexEntries(leavesDir: string, files: string[]): LintIssue[] {
+function staleIndexEntries(storeDir: string): LintIssue[] {
 	const issues: LintIssue[] = [];
-	for (const file of files) {
-		if (basename(file) !== "INDEX.md") continue;
-		const content = readFileSync(file, "utf-8");
-		const rel = relative(leavesDir, file);
-		for (const { link, line } of extractWikilinks(content)) {
-			const target = resolveLinkTarget(leavesDir, file, link);
-			if (!exists(target)) {
-				issues.push({
-					check: "stale-index",
-					file: rel,
-					line,
-					message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`,
-				});
-			}
+	const file = join(storeDir, "INDEX.md");
+	if (!exists(file)) return issues;
+
+	const content = readFileSync(file, "utf-8");
+	for (const { link, line } of extractWikilinks(content)) {
+		if (isPathLink(link)) {
+			issues.push({
+				check: "path-link",
+				file: "INDEX.md",
+				line,
+				message: `[[${link}]] uses a path; use bare flat name`,
+			});
+			continue;
+		}
+		const target = targetPath(storeDir, link);
+		if (!exists(target)) {
+			issues.push({
+				check: "stale-index",
+				file: "INDEX.md",
+				line,
+				message: `[[${link}]] → ${relative(storeDir, target)} does not exist`,
+			});
 		}
 	}
 	return issues;
@@ -122,30 +192,24 @@ function staleIndexEntries(leavesDir: string, files: string[]): LintIssue[] {
 
 // ── Check: orphan leaves ───────────────────────────────────────────
 
-function orphanLeaves(leavesDir: string, files: string[]): LintIssue[] {
+function orphanLeaves(storeDir: string): LintIssue[] {
 	const issues: LintIssue[] = [];
+	const index = join(storeDir, "INDEX.md");
+	if (!exists(index)) return issues;
 
-	// Collect normalized link targets from all INDEX files
 	const indexed = new Set<string>();
-	for (const file of files) {
-		if (basename(file) !== "INDEX.md") continue;
-		const content = readFileSync(file, "utf-8");
-		for (const { link } of extractWikilinks(content)) {
-			const target = resolveLinkTarget(leavesDir, file, link);
-			indexed.add(relative(leavesDir, target).replace(/\.md$/, ""));
-		}
+	for (const { link } of extractWikilinks(readFileSync(index, "utf-8"))) {
+		if (!isPathLink(link))
+			indexed.add(link.replace(/#.*$/, "").replace(/\.md$/, ""));
 	}
 
-	// Every non-structural .md must appear in at least one INDEX
-	for (const file of files) {
-		const name = basename(file);
-		if (name === "INDEX.md" || name === "SCHEMA.md") continue;
-		const relNoExt = relative(leavesDir, file).replace(/\.md$/, "");
+	for (const file of contentLeafFiles(storeDir)) {
+		const relNoExt = basename(file, ".md");
 		if (!indexed.has(relNoExt)) {
 			issues.push({
 				check: "orphan",
-				file: relative(leavesDir, file),
-				message: "not referenced in any INDEX.md",
+				file: basename(file),
+				message: "not referenced in root INDEX.md",
 			});
 		}
 	}
@@ -154,30 +218,27 @@ function orphanLeaves(leavesDir: string, files: string[]): LintIssue[] {
 
 // ── Check: duplicate index entries ────────────────────────────────
 
-function duplicateIndexEntries(
-	leavesDir: string,
-	files: string[],
-): LintIssue[] {
+function duplicateIndexEntries(storeDir: string): LintIssue[] {
 	const issues: LintIssue[] = [];
-	for (const file of files) {
-		if (basename(file) !== "INDEX.md") continue;
-		const content = readFileSync(file, "utf-8");
-		const links = extractWikilinks(content);
-		const seen = new Map<string, number[]>();
-		for (const { link, line } of links) {
-			const norm = link.replace(/\.md$/, "").trim();
-			const lines = seen.get(norm) || [];
-			lines.push(line);
-			seen.set(norm, lines);
-		}
-		for (const [target, lines] of seen) {
-			if (lines.length > 1) {
-				issues.push({
-					check: "duplicate-index",
-					file: relative(leavesDir, file),
-					message: `${target}  at lines ${lines.join(", ")}`,
-				});
-			}
+	const file = join(storeDir, "INDEX.md");
+	if (!exists(file)) return issues;
+
+	const content = readFileSync(file, "utf-8");
+	const links = extractWikilinks(content);
+	const seen = new Map<string, number[]>();
+	for (const { link, line } of links) {
+		const norm = link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
+		const lines = seen.get(norm) || [];
+		lines.push(line);
+		seen.set(norm, lines);
+	}
+	for (const [target, lines] of seen) {
+		if (lines.length > 1) {
+			issues.push({
+				check: "duplicate-index",
+				file: "INDEX.md",
+				message: `${target} at lines ${lines.join(", ")}`,
+			});
 		}
 	}
 	return issues;
@@ -185,7 +246,7 @@ function duplicateIndexEntries(
 
 // ── Check: leaf size / token budget ────────────────────────────────
 
-function leafSizeWarnings(leavesDir: string, files: string[]): LintIssue[] {
+function leafSizeWarnings(storeDir: string, files: string[]): LintIssue[] {
 	const issues: LintIssue[] = [];
 	for (const file of files) {
 		const bytes = statSync(file).size;
@@ -193,7 +254,7 @@ function leafSizeWarnings(leavesDir: string, files: string[]): LintIssue[] {
 		if (tokens > DEFAULT_TOKEN_WARN) {
 			issues.push({
 				check: "leaf-size",
-				file: relative(leavesDir, file),
+				file: relative(storeDir, file),
 				message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${DEFAULT_TOKEN_WARN.toLocaleString()})`,
 			});
 		}
@@ -203,13 +264,13 @@ function leafSizeWarnings(leavesDir: string, files: string[]): LintIssue[] {
 
 // ── Check: frontmatter ─────────────────────────────────────────────
 
-function frontmatterErrors(leavesDir: string, files: string[]): LintIssue[] {
+function frontmatterErrors(storeDir: string, files: string[]): LintIssue[] {
 	const issues: LintIssue[] = [];
 	for (const file of files) {
 		const content = readFileSync(file, "utf-8");
 		if (!content.startsWith("---")) continue;
 
-		const rel = relative(leavesDir, file);
+		const rel = relative(storeDir, file);
 		const m = content.match(FRONTMATTER_RE);
 		if (!m) {
 			issues.push({
@@ -229,7 +290,7 @@ function frontmatterErrors(leavesDir: string, files: string[]): LintIssue[] {
 				issues.push({
 					check: "frontmatter",
 					file: rel,
-					line: i + 2, // +2 for opening ---
+					line: i + 2,
 					message: "tab-indented YAML (use spaces)",
 				});
 			} else if (
@@ -252,18 +313,20 @@ function frontmatterErrors(leavesDir: string, files: string[]): LintIssue[] {
 
 // ── Main ────────────────────────────────────────────────────────────
 
-export function lint(leavesDir: string): LintResult {
-	const files = walkMdFiles(leavesDir);
-	if (files.length === 0) return { issues: [] };
+export function lint(storeDir: string): LintResult {
+	const allFiles = walkMdFiles(storeDir);
+	const rootFiles = rootMdFiles(storeDir);
+	if (allFiles.length === 0) return { issues: [] };
 
 	return {
 		issues: [
-			...brokenLinks(leavesDir, files),
-			...staleIndexEntries(leavesDir, files),
-			...orphanLeaves(leavesDir, files),
-			...duplicateIndexEntries(leavesDir, files),
-			...leafSizeWarnings(leavesDir, files),
-			...frontmatterErrors(leavesDir, files),
+			...structureIssues(storeDir, allFiles),
+			...brokenLinks(storeDir, rootFiles),
+			...staleIndexEntries(storeDir),
+			...orphanLeaves(storeDir),
+			...duplicateIndexEntries(storeDir),
+			...leafSizeWarnings(storeDir, rootFiles),
+			...frontmatterErrors(storeDir, rootFiles),
 		],
 	};
 }
@@ -271,6 +334,8 @@ export function lint(leavesDir: string): LintResult {
 // ── Output formatting ────────────────────────────────────────────
 
 const CHECK_GROUPS: { label: string; key: string }[] = [
+	{ label: "STRUCTURE", key: "structure" },
+	{ label: "PATH LINKS", key: "path-link" },
 	{ label: "BROKEN LINKS", key: "broken-link" },
 	{ label: "STALE INDEX ENTRIES", key: "stale-index" },
 	{ label: "ORPHAN LEAVES", key: "orphan" },

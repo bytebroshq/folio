@@ -76,7 +76,7 @@ folio switch -c my-topic
 Edit files here:
 
 ```bash
-~/.config/folio/stores/amendments/my-topic/leaves/
+~/.config/folio/stores/amendments/my-topic/
 ```
 
 Check state:

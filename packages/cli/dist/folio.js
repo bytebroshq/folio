@@ -206,16 +206,24 @@ function listOpenPRs(remote) {
 
 // src/lint.ts
 import { readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 var DEFAULT_TOKEN_WARN = 1e4;
+var STRUCTURAL_FILES = new Set([
+  "INDEX.md",
+  "SCHEMA.md",
+  "AGENTS.md",
+  "README.md"
+]);
 function walkMdFiles(dir) {
   const results = [];
   const s = statSync(dir, { throwIfNoEntry: false });
   if (!s?.isDirectory())
     return results;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === ".git" || entry.name.startsWith("."))
+      continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       results.push(...walkMdFiles(full));
@@ -225,24 +233,32 @@ function walkMdFiles(dir) {
   }
   return results;
 }
+function rootMdFiles(storeDir) {
+  const results = [];
+  for (const entry of readdirSync(storeDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      results.push(join(storeDir, entry.name));
+    }
+  }
+  return results.sort();
+}
+function contentLeafFiles(storeDir) {
+  return rootMdFiles(storeDir).filter((file) => !STRUCTURAL_FILES.has(basename(file)));
+}
 function extractWikilinks(content) {
   const results = [];
   const lines = content.split(`
 `);
   for (let i = 0;i < lines.length; i++) {
-    WIKILINK_RE.lastIndex = 0;
     for (const match of lines[i].matchAll(WIKILINK_RE)) {
       results.push({ link: match[1].trim(), line: i + 1 });
     }
   }
   return results;
 }
-function resolveLinkTarget(_leavesDir, sourceFile, link) {
+function targetPath(storeDir, link) {
   const clean = link.replace(/#.*$/, "");
-  let target = resolve(dirname(sourceFile), clean);
-  if (!target.endsWith(".md"))
-    target += ".md";
-  return target;
+  return resolve(storeDir, clean.endsWith(".md") ? clean : `${clean}.md`);
 }
 function exists(p) {
   return !!statSync(p, { throwIfNoEntry: false });
@@ -254,101 +270,143 @@ function fmtBytes(n) {
     return `${(n / 1024).toFixed(1)}KB`;
   return `${(n / 1048576).toFixed(1)}MB`;
 }
-function brokenLinks(leavesDir, files) {
+function isPathLink(link) {
+  const clean = link.replace(/#.*$/, "");
+  return clean.includes("/") || clean.startsWith(".") || clean.startsWith("~");
+}
+function structureIssues(storeDir, allFiles) {
+  const issues = [];
+  if (!exists(join(storeDir, "INDEX.md"))) {
+    issues.push({
+      check: "structure",
+      file: "INDEX.md",
+      message: "missing required root INDEX.md"
+    });
+  }
+  if (!exists(join(storeDir, "SCHEMA.md"))) {
+    issues.push({
+      check: "structure",
+      file: "SCHEMA.md",
+      message: "missing required root SCHEMA.md"
+    });
+  }
+  for (const file of allFiles) {
+    const rel = relative(storeDir, file);
+    if (rel.includes("/")) {
+      issues.push({
+        check: "structure",
+        file: rel,
+        message: "nested Markdown file; Folio leaves must be flat at store root"
+      });
+    }
+  }
+  return issues;
+}
+function brokenLinks(storeDir, files) {
   const issues = [];
   for (const file of files) {
     if (basename(file) === "INDEX.md")
       continue;
     const content = readFileSync2(file, "utf-8");
     for (const { link, line } of extractWikilinks(content)) {
-      const target = resolveLinkTarget(leavesDir, file, link);
+      if (isPathLink(link)) {
+        issues.push({
+          check: "path-link",
+          file: relative(storeDir, file),
+          line,
+          message: `[[${link}]] uses a path; use bare flat name`
+        });
+        continue;
+      }
+      const target = targetPath(storeDir, link);
       if (!exists(target)) {
         issues.push({
           check: "broken-link",
-          file: relative(leavesDir, file),
+          file: relative(storeDir, file),
           line,
-          message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`
+          message: `[[${link}]] → ${relative(storeDir, target)} does not exist`
         });
       }
     }
   }
   return issues;
 }
-function staleIndexEntries(leavesDir, files) {
+function staleIndexEntries(storeDir) {
   const issues = [];
-  for (const file of files) {
-    if (basename(file) !== "INDEX.md")
-      continue;
-    const content = readFileSync2(file, "utf-8");
-    const rel = relative(leavesDir, file);
-    for (const { link, line } of extractWikilinks(content)) {
-      const target = resolveLinkTarget(leavesDir, file, link);
-      if (!exists(target)) {
-        issues.push({
-          check: "stale-index",
-          file: rel,
-          line,
-          message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`
-        });
-      }
-    }
-  }
-  return issues;
-}
-function orphanLeaves(leavesDir, files) {
-  const issues = [];
-  const indexed = new Set;
-  for (const file of files) {
-    if (basename(file) !== "INDEX.md")
-      continue;
-    const content = readFileSync2(file, "utf-8");
-    for (const { link } of extractWikilinks(content)) {
-      const target = resolveLinkTarget(leavesDir, file, link);
-      indexed.add(relative(leavesDir, target).replace(/\.md$/, ""));
-    }
-  }
-  for (const file of files) {
-    const name = basename(file);
-    if (name === "INDEX.md" || name === "SCHEMA.md")
-      continue;
-    const relNoExt = relative(leavesDir, file).replace(/\.md$/, "");
-    if (!indexed.has(relNoExt)) {
+  const file = join(storeDir, "INDEX.md");
+  if (!exists(file))
+    return issues;
+  const content = readFileSync2(file, "utf-8");
+  for (const { link, line } of extractWikilinks(content)) {
+    if (isPathLink(link)) {
       issues.push({
-        check: "orphan",
-        file: relative(leavesDir, file),
-        message: "not referenced in any INDEX.md"
+        check: "path-link",
+        file: "INDEX.md",
+        line,
+        message: `[[${link}]] uses a path; use bare flat name`
+      });
+      continue;
+    }
+    const target = targetPath(storeDir, link);
+    if (!exists(target)) {
+      issues.push({
+        check: "stale-index",
+        file: "INDEX.md",
+        line,
+        message: `[[${link}]] → ${relative(storeDir, target)} does not exist`
       });
     }
   }
   return issues;
 }
-function duplicateIndexEntries(leavesDir, files) {
+function orphanLeaves(storeDir) {
   const issues = [];
-  for (const file of files) {
-    if (basename(file) !== "INDEX.md")
-      continue;
-    const content = readFileSync2(file, "utf-8");
-    const links = extractWikilinks(content);
-    const seen = new Map;
-    for (const { link, line } of links) {
-      const norm = link.replace(/\.md$/, "").trim();
-      const lines = seen.get(norm) || [];
-      lines.push(line);
-      seen.set(norm, lines);
-    }
-    for (const [target, lines] of seen) {
-      if (lines.length > 1) {
-        issues.push({
-          check: "duplicate-index",
-          file: relative(leavesDir, file),
-          message: `${target}  at lines ${lines.join(", ")}`
-        });
-      }
+  const index = join(storeDir, "INDEX.md");
+  if (!exists(index))
+    return issues;
+  const indexed = new Set;
+  for (const { link } of extractWikilinks(readFileSync2(index, "utf-8"))) {
+    if (!isPathLink(link))
+      indexed.add(link.replace(/#.*$/, "").replace(/\.md$/, ""));
+  }
+  for (const file of contentLeafFiles(storeDir)) {
+    const relNoExt = basename(file, ".md");
+    if (!indexed.has(relNoExt)) {
+      issues.push({
+        check: "orphan",
+        file: basename(file),
+        message: "not referenced in root INDEX.md"
+      });
     }
   }
   return issues;
 }
-function leafSizeWarnings(leavesDir, files) {
+function duplicateIndexEntries(storeDir) {
+  const issues = [];
+  const file = join(storeDir, "INDEX.md");
+  if (!exists(file))
+    return issues;
+  const content = readFileSync2(file, "utf-8");
+  const links = extractWikilinks(content);
+  const seen = new Map;
+  for (const { link, line } of links) {
+    const norm = link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
+    const lines = seen.get(norm) || [];
+    lines.push(line);
+    seen.set(norm, lines);
+  }
+  for (const [target, lines] of seen) {
+    if (lines.length > 1) {
+      issues.push({
+        check: "duplicate-index",
+        file: "INDEX.md",
+        message: `${target} at lines ${lines.join(", ")}`
+      });
+    }
+  }
+  return issues;
+}
+function leafSizeWarnings(storeDir, files) {
   const issues = [];
   for (const file of files) {
     const bytes = statSync(file).size;
@@ -356,20 +414,20 @@ function leafSizeWarnings(leavesDir, files) {
     if (tokens > DEFAULT_TOKEN_WARN) {
       issues.push({
         check: "leaf-size",
-        file: relative(leavesDir, file),
+        file: relative(storeDir, file),
         message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${DEFAULT_TOKEN_WARN.toLocaleString()})`
       });
     }
   }
   return issues;
 }
-function frontmatterErrors(leavesDir, files) {
+function frontmatterErrors(storeDir, files) {
   const issues = [];
   for (const file of files) {
     const content = readFileSync2(file, "utf-8");
     if (!content.startsWith("---"))
       continue;
-    const rel = relative(leavesDir, file);
+    const rel = relative(storeDir, file);
     const m = content.match(FRONTMATTER_RE);
     if (!m) {
       issues.push({
@@ -404,22 +462,26 @@ function frontmatterErrors(leavesDir, files) {
   }
   return issues;
 }
-function lint(leavesDir) {
-  const files = walkMdFiles(leavesDir);
-  if (files.length === 0)
+function lint(storeDir) {
+  const allFiles = walkMdFiles(storeDir);
+  const rootFiles = rootMdFiles(storeDir);
+  if (allFiles.length === 0)
     return { issues: [] };
   return {
     issues: [
-      ...brokenLinks(leavesDir, files),
-      ...staleIndexEntries(leavesDir, files),
-      ...orphanLeaves(leavesDir, files),
-      ...duplicateIndexEntries(leavesDir, files),
-      ...leafSizeWarnings(leavesDir, files),
-      ...frontmatterErrors(leavesDir, files)
+      ...structureIssues(storeDir, allFiles),
+      ...brokenLinks(storeDir, rootFiles),
+      ...staleIndexEntries(storeDir),
+      ...orphanLeaves(storeDir),
+      ...duplicateIndexEntries(storeDir),
+      ...leafSizeWarnings(storeDir, rootFiles),
+      ...frontmatterErrors(storeDir, rootFiles)
     ]
   };
 }
 var CHECK_GROUPS = [
+  { label: "STRUCTURE", key: "structure" },
+  { label: "PATH LINKS", key: "path-link" },
   { label: "BROKEN LINKS", key: "broken-link" },
   { label: "STALE INDEX ENTRIES", key: "stale-index" },
   { label: "ORPHAN LEAVES", key: "orphan" },
@@ -557,7 +619,7 @@ function cmdSwitchCreate(topic, force) {
       console.log(`Rebasing ${slug} onto main...`);
       const rebase = run(`git -C "${path}" rebase origin/main --quiet 2>/dev/null`, { quiet: true });
       if (rebase.exitCode !== 0) {
-        throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/leaves/ then re-run 'folio sync'.`);
+        throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`);
       }
       run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
       setActive(slug);
@@ -580,7 +642,7 @@ function cmdSwitchCreate(topic, force) {
   }
   setActive(slug);
   console.log(`✓ Amendment '${slug}' created.`);
-  console.log(`  leaves: ${path}/leaves/`);
+  console.log(`  store: ${path}/`);
 }
 function cmdSwitchTo(topic) {
   const slug = topicToSlug(topic);
@@ -598,7 +660,7 @@ function cmdSwitchTo(topic) {
   console.log(`Rebasing ${slug} onto main...`);
   const rebase = run(`git -C "${path}" rebase origin/main --quiet 2>/dev/null`, { quiet: true });
   if (rebase.exitCode !== 0) {
-    throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/leaves/ then re-run 'folio sync'.`);
+    throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`);
   }
   setActive(slug);
   console.log(`✓ Switched to amendment '${slug}'.`);
@@ -624,9 +686,9 @@ function cmdSync(args) {
     if (pull.exitCode !== 0) {
       throw new Error("Failed to pull main. Check network.");
     }
-    const hasChanges2 = run(`git -C "${BASE_REPO}" diff --quiet -- leaves/ 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${BASE_REPO}" diff --cached --quiet -- leaves/ 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
+    const hasChanges2 = run(`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
     if (hasChanges2) {
-      console.log("  (uncommitted edits in store/leaves/ — did you mean to amend?)");
+      console.log("  (uncommitted edits in store — did you mean to amend?)");
     }
     console.log("✓ on main, synced.");
     return;
@@ -765,12 +827,9 @@ function cmdStatus() {
   const active = getActive();
   if (!active) {
     console.log("on main — no open amendments.");
-    const leavesDir = `${BASE_REPO}/leaves`;
-    if (existsSync3(leavesDir)) {
-      const dirty = run(`git -C "${BASE_REPO}" diff --quiet -- leaves/ 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${BASE_REPO}" diff --cached --quiet -- leaves/ 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
-      if (dirty) {
-        console.log("  (uncommitted edits in store/leaves/ — did you mean to amend?)");
-      }
+    const dirty = run(`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
+    if (dirty) {
+      console.log("  (uncommitted edits in store — did you mean to amend?)");
     }
     const remoteBound = readConfig("remote");
     if (remoteBound && mainExists()) {
@@ -894,15 +953,15 @@ function cmdLint(args) {
   const json = args.includes("--json");
   const strict = args.includes("--strict");
   const active = getActive();
-  let leavesDir;
-  if (active && existsSync3(`${AMEND_DIR}/${active}/leaves`)) {
-    leavesDir = `${AMEND_DIR}/${active}/leaves`;
+  let storeDir;
+  if (active && existsSync3(`${AMEND_DIR}/${active}`)) {
+    storeDir = `${AMEND_DIR}/${active}`;
   } else if (mainExists()) {
-    leavesDir = `${BASE_REPO}/leaves`;
+    storeDir = BASE_REPO;
   } else {
     throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
   }
-  const result = lint(leavesDir);
+  const result = lint(storeDir);
   if (json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
@@ -939,7 +998,7 @@ Usage:
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any issues
 
-Edits go in ~/.config/folio/stores/amendments/<topic>/leaves/.
+Edits go in ~/.config/folio/stores/amendments/<topic>/.
 folio sync opens a draft PR; merge via folio web.
 `);
   process.exit(0);
