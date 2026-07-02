@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
 	AMEND_DIR,
 	amendmentPath,
@@ -27,7 +28,6 @@ import {
 	run,
 	worktreeExists,
 } from "./git";
-import { hasLintErrors, lint, printLintResult } from "./lint";
 import { openBrowser } from "./open";
 
 // ── Formatting helpers ──────────────────────────────────────────────

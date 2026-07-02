@@ -3,215 +3,14 @@
 // src/commands.ts
 import { existsSync as existsSync3 } from "node:fs";
 
-// src/config.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-var FOLIO_HOME = `${homedir()}/.config/folio`;
-var STORE_DIR = `${FOLIO_HOME}/stores`;
-var AMEND_DIR = `${STORE_DIR}/amendments`;
-var CONFIG_FILE = `${FOLIO_HOME}/config.yml`;
-var BASE_REPO = `${STORE_DIR}/.main`;
-function readConfig(key) {
-  if (!existsSync(CONFIG_FILE))
-    return null;
-  const raw = readFileSync(CONFIG_FILE, "utf-8");
-  if (!key)
-    return raw;
-  const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
-  const val = match ? match[1].trim() : null;
-  return val && val !== "" ? val : null;
-}
-function writeConfig(key, value) {
-  const file = existsSync(CONFIG_FILE) ? readFileSync(CONFIG_FILE, "utf-8") : `remote: 
-store: git
-active: 
-`;
-  const regex = new RegExp(`^${key}:.*$`, "m");
-  const line = `${key}: ${value}`;
-  const updated = regex.test(file) ? file.replace(regex, line) : `${file.trimEnd()}
-${line}
-`;
-  writeFileSync(CONFIG_FILE, updated, "utf-8");
-}
-function ensureConfig() {
-  mkdirSync(FOLIO_HOME, { recursive: true });
-  mkdirSync(STORE_DIR, { recursive: true });
-  mkdirSync(AMEND_DIR, { recursive: true });
-  if (!existsSync(CONFIG_FILE)) {
-    writeConfig("remote", "");
-    writeConfig("store", "git");
-    writeConfig("active", "");
-  }
-}
-function getActive() {
-  return readConfig("active");
-}
-function setActive(topic) {
-  writeConfig("active", topic);
-}
-function clearActive() {
-  writeConfig("active", "");
-}
-function topicToSlug(topic) {
-  return topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-/, "").replace(/-$/, "");
-}
-function amendmentPath(topic) {
-  return `${AMEND_DIR}/${topicToSlug(topic)}`;
-}
-function getRemote() {
-  const remote = readConfig("remote");
-  if (!remote)
-    throw new Error("no remote configured — run 'folio bind <ns/repo>'");
-  return remote;
-}
-
-// src/git.ts
-import { execSync } from "node:child_process";
-import { existsSync as existsSync2 } from "node:fs";
-function run(cmd, opts) {
-  try {
-    const result = execSync(cmd, {
-      encoding: "utf-8",
-      cwd: opts?.cwd,
-      stdio: opts?.quiet ? "pipe" : "pipe",
-      maxBuffer: 1024 * 1024
-    });
-    return {
-      stdout: (result || "").trim(),
-      stderr: "",
-      exitCode: 0
-    };
-  } catch (err) {
-    const e = err;
-    return {
-      stdout: (e.stdout || "").toString().trim(),
-      stderr: (e.stderr || "").toString().trim(),
-      exitCode: e.status ?? 1
-    };
-  }
-}
-function gh(args, remote) {
-  const repo = remote ?? getRemote();
-  return run(`gh ${args} --repo "${repo}"`, { quiet: true });
-}
-function ensureBase(remote) {
-  const repo = remote ?? getRemote();
-  if (existsSync2(`${BASE_REPO}/.git`)) {
-    return;
-  }
-  console.log("Initializing shared clone...");
-  const r = run(`git clone --quiet git@github.com:${repo}.git "${BASE_REPO}"`);
-  if (r.exitCode !== 0) {
-    throw new Error(`Failed to clone ${repo}. Check access and try again.`);
-  }
-  run(`git -C "${BASE_REPO}" config extensions.worktreeConfig true`, {
-    quiet: true
-  });
-}
-function mainExists() {
-  return existsSync2(`${BASE_REPO}/.git`);
-}
-function fetchMain() {
-  run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
-}
-function behindCount() {
-  const result = run(`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`, { quiet: true });
-  return Number.parseInt(result.stdout || "0", 10);
-}
-function amendmentBranch(path) {
-  return run(`git -C "${path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""`, {
-    quiet: true
-  }).stdout || "?";
-}
-function isDirty(path) {
-  const diff = run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
-    quiet: true
-  }).stdout;
-  const cached = run(`git -C "${path}" diff --cached --quiet 2>/dev/null || echo dirty`, { quiet: true }).stdout;
-  const untracked = run(`git -C "${path}" ls-files --others --exclude-standard 2>/dev/null`, { quiet: true }).stdout;
-  return diff !== "" || cached !== "" || untracked !== "";
-}
-function worktreeExists(path) {
-  return existsSync2(`${path}/.git`);
-}
-function batchPRs(remote) {
-  const map = new Map;
-  const result = gh(`pr list --state open --json number,headRefName --jq '.[] | .headRefName + "@" + (.number|tostring)'`, remote);
-  if (!result.stdout)
-    return map;
-  for (const line of result.stdout.split(`
-`)) {
-    const sep = line.lastIndexOf("@");
-    if (sep === -1)
-      continue;
-    const branch = line.slice(0, sep);
-    const num = line.slice(sep + 1);
-    if (branch && num)
-      map.set(branch, num);
-  }
-  return map;
-}
-function listAmendments() {
-  const results = [];
-  const { exitCode } = run(`ls "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
-  if (exitCode !== 0)
-    return results;
-  const { stdout } = run(`ls -1 "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
-  if (!stdout)
-    return results;
-  const remote = readConfig("remote");
-  const topics = [];
-  const topicBranches = new Map;
-  for (const topic of stdout.split(`
-`)) {
-    if (!topic)
-      continue;
-    const path = `${AMEND_DIR}/${topic}`;
-    if (!existsSync2(path))
-      continue;
-    const branch = amendmentBranch(path);
-    if (branch && branch !== "?")
-      topicBranches.set(topic, branch);
-    topics.push(topic);
-  }
-  const prMap = remote ? batchPRs(remote) : new Map;
-  for (const topic of topics) {
-    const path = `${AMEND_DIR}/${topic}`;
-    const dirty = isDirty(path);
-    const status = dirty ? "dirty" : "clean";
-    let pr;
-    const branch = topicBranches.get(topic);
-    if (branch) {
-      const prNum = prMap.get(branch);
-      if (prNum)
-        pr = `PR #${prNum}`;
-    }
-    results.push({ topic, status, pr });
-  }
-  return results;
-}
-function ensureGh() {
-  const r = run("which gh 2>/dev/null", { quiet: true });
-  if (r.exitCode !== 0) {
-    throw new Error("gh CLI not found. Install from https://cli.github.com");
-  }
-}
-function listOpenPRs(remote) {
-  const result = gh(`pr list --state open --json number,title,headRefName --jq '.[] | "#\\(.number)  \\(.title)  (\\(.headRefName))"'`, remote);
-  if (!result.stdout)
-    return [];
-  return result.stdout.split(`
-`);
-}
-
 // ../core/src/lint/checks/frontmatter.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 function frontmatterCheck(ctx) {
   const issues = [];
   for (const file of ctx.files.allMdFiles) {
-    const content = readFileSync2(file, "utf-8");
+    const content = readFileSync(file, "utf-8");
     if (!content.startsWith("---"))
       continue;
     const rel = relative(ctx.storeDir, file);
@@ -253,7 +52,7 @@ function frontmatterCheck(ctx) {
 }
 
 // ../core/src/lint/checks/links.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 import { basename as basename2, relative as relative2 } from "node:path";
 
 // ../core/src/lint/files.ts
@@ -338,7 +137,7 @@ function linkCheck(ctx) {
   let pathLinkCount = 0;
   for (const file of ctx.files.allMdFiles) {
     const rel = relative2(ctx.storeDir, file);
-    const content = readFileSync3(file, "utf-8");
+    const content = readFileSync2(file, "utf-8");
     for (const { link, line } of extractWikilinks(content)) {
       if (hasRelativePathMarker(link)) {
         issues.push({
@@ -380,7 +179,7 @@ function duplicateIndexEntriesCheck(ctx) {
   if (!index)
     return issues;
   const seen = new Map;
-  for (const { link, line } of extractWikilinks(readFileSync3(index, "utf-8"))) {
+  for (const { link, line } of extractWikilinks(readFileSync2(index, "utf-8"))) {
     const norm = cleanLinkTarget(link);
     const lines = seen.get(norm) || [];
     lines.push(line);
@@ -404,7 +203,7 @@ function orphanLeavesCheck(ctx) {
   if (!index)
     return issues;
   const indexed = new Set;
-  for (const { link } of extractWikilinks(readFileSync3(index, "utf-8"))) {
+  for (const { link } of extractWikilinks(readFileSync2(index, "utf-8"))) {
     if (!hasRelativePathMarker(link))
       indexed.add(cleanLinkTarget(link));
   }
@@ -600,6 +399,207 @@ function lint(storeDir, options = {}) {
 function hasLintErrors(result) {
   return result.issues.some((issue) => issue.severity === "error");
 }
+// src/config.ts
+import { existsSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+var FOLIO_HOME = `${homedir()}/.config/folio`;
+var STORE_DIR = `${FOLIO_HOME}/stores`;
+var AMEND_DIR = `${STORE_DIR}/amendments`;
+var CONFIG_FILE = `${FOLIO_HOME}/config.yml`;
+var BASE_REPO = `${STORE_DIR}/.main`;
+function readConfig(key) {
+  if (!existsSync(CONFIG_FILE))
+    return null;
+  const raw = readFileSync3(CONFIG_FILE, "utf-8");
+  if (!key)
+    return raw;
+  const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
+  const val = match ? match[1].trim() : null;
+  return val && val !== "" ? val : null;
+}
+function writeConfig(key, value) {
+  const file = existsSync(CONFIG_FILE) ? readFileSync3(CONFIG_FILE, "utf-8") : `remote: 
+store: git
+active: 
+`;
+  const regex = new RegExp(`^${key}:.*$`, "m");
+  const line = `${key}: ${value}`;
+  const updated = regex.test(file) ? file.replace(regex, line) : `${file.trimEnd()}
+${line}
+`;
+  writeFileSync(CONFIG_FILE, updated, "utf-8");
+}
+function ensureConfig() {
+  mkdirSync(FOLIO_HOME, { recursive: true });
+  mkdirSync(STORE_DIR, { recursive: true });
+  mkdirSync(AMEND_DIR, { recursive: true });
+  if (!existsSync(CONFIG_FILE)) {
+    writeConfig("remote", "");
+    writeConfig("store", "git");
+    writeConfig("active", "");
+  }
+}
+function getActive() {
+  return readConfig("active");
+}
+function setActive(topic) {
+  writeConfig("active", topic);
+}
+function clearActive() {
+  writeConfig("active", "");
+}
+function topicToSlug(topic) {
+  return topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-/, "").replace(/-$/, "");
+}
+function amendmentPath(topic) {
+  return `${AMEND_DIR}/${topicToSlug(topic)}`;
+}
+function getRemote() {
+  const remote = readConfig("remote");
+  if (!remote)
+    throw new Error("no remote configured — run 'folio bind <ns/repo>'");
+  return remote;
+}
+
+// src/git.ts
+import { execSync } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+function run(cmd, opts) {
+  try {
+    const result = execSync(cmd, {
+      encoding: "utf-8",
+      cwd: opts?.cwd,
+      stdio: opts?.quiet ? "pipe" : "pipe",
+      maxBuffer: 1024 * 1024
+    });
+    return {
+      stdout: (result || "").trim(),
+      stderr: "",
+      exitCode: 0
+    };
+  } catch (err) {
+    const e = err;
+    return {
+      stdout: (e.stdout || "").toString().trim(),
+      stderr: (e.stderr || "").toString().trim(),
+      exitCode: e.status ?? 1
+    };
+  }
+}
+function gh(args, remote) {
+  const repo = remote ?? getRemote();
+  return run(`gh ${args} --repo "${repo}"`, { quiet: true });
+}
+function ensureBase(remote) {
+  const repo = remote ?? getRemote();
+  if (existsSync2(`${BASE_REPO}/.git`)) {
+    return;
+  }
+  console.log("Initializing shared clone...");
+  const r = run(`git clone --quiet git@github.com:${repo}.git "${BASE_REPO}"`);
+  if (r.exitCode !== 0) {
+    throw new Error(`Failed to clone ${repo}. Check access and try again.`);
+  }
+  run(`git -C "${BASE_REPO}" config extensions.worktreeConfig true`, {
+    quiet: true
+  });
+}
+function mainExists() {
+  return existsSync2(`${BASE_REPO}/.git`);
+}
+function fetchMain() {
+  run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
+}
+function behindCount() {
+  const result = run(`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`, { quiet: true });
+  return Number.parseInt(result.stdout || "0", 10);
+}
+function amendmentBranch(path) {
+  return run(`git -C "${path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""`, {
+    quiet: true
+  }).stdout || "?";
+}
+function isDirty(path) {
+  const diff = run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
+    quiet: true
+  }).stdout;
+  const cached = run(`git -C "${path}" diff --cached --quiet 2>/dev/null || echo dirty`, { quiet: true }).stdout;
+  const untracked = run(`git -C "${path}" ls-files --others --exclude-standard 2>/dev/null`, { quiet: true }).stdout;
+  return diff !== "" || cached !== "" || untracked !== "";
+}
+function worktreeExists(path) {
+  return existsSync2(`${path}/.git`);
+}
+function batchPRs(remote) {
+  const map = new Map;
+  const result = gh(`pr list --state open --json number,headRefName --jq '.[] | .headRefName + "@" + (.number|tostring)'`, remote);
+  if (!result.stdout)
+    return map;
+  for (const line of result.stdout.split(`
+`)) {
+    const sep = line.lastIndexOf("@");
+    if (sep === -1)
+      continue;
+    const branch = line.slice(0, sep);
+    const num = line.slice(sep + 1);
+    if (branch && num)
+      map.set(branch, num);
+  }
+  return map;
+}
+function listAmendments() {
+  const results = [];
+  const { exitCode } = run(`ls "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
+  if (exitCode !== 0)
+    return results;
+  const { stdout } = run(`ls -1 "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
+  if (!stdout)
+    return results;
+  const remote = readConfig("remote");
+  const topics = [];
+  const topicBranches = new Map;
+  for (const topic of stdout.split(`
+`)) {
+    if (!topic)
+      continue;
+    const path = `${AMEND_DIR}/${topic}`;
+    if (!existsSync2(path))
+      continue;
+    const branch = amendmentBranch(path);
+    if (branch && branch !== "?")
+      topicBranches.set(topic, branch);
+    topics.push(topic);
+  }
+  const prMap = remote ? batchPRs(remote) : new Map;
+  for (const topic of topics) {
+    const path = `${AMEND_DIR}/${topic}`;
+    const dirty = isDirty(path);
+    const status = dirty ? "dirty" : "clean";
+    let pr;
+    const branch = topicBranches.get(topic);
+    if (branch) {
+      const prNum = prMap.get(branch);
+      if (prNum)
+        pr = `PR #${prNum}`;
+    }
+    results.push({ topic, status, pr });
+  }
+  return results;
+}
+function ensureGh() {
+  const r = run("which gh 2>/dev/null", { quiet: true });
+  if (r.exitCode !== 0) {
+    throw new Error("gh CLI not found. Install from https://cli.github.com");
+  }
+}
+function listOpenPRs(remote) {
+  const result = gh(`pr list --state open --json number,title,headRefName --jq '.[] | "#\\(.number)  \\(.title)  (\\(.headRefName))"'`, remote);
+  if (!result.stdout)
+    return [];
+  return result.stdout.split(`
+`);
+}
+
 // src/open.ts
 function openBrowser(url) {
   try {
