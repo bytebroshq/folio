@@ -16,14 +16,14 @@ function readConfig(key) {
   if (!existsSync(CONFIG_FILE))
     return null;
   const raw = readFileSync(CONFIG_FILE, "utf-8");
-  if (key) {
-    const match = raw.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
-    return match ? match[1].trim() : null;
-  }
-  return raw;
+  if (!key)
+    return raw;
+  const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
+  const val = match ? match[1].trim() : null;
+  return val && val !== "" ? val : null;
 }
 function writeConfig(key, value) {
-  const file = existsSync(CONFIG_FILE) ? readFileSync(CONFIG_FILE, "utf-8") : `remote: jubalm/folio
+  const file = existsSync(CONFIG_FILE) ? readFileSync(CONFIG_FILE, "utf-8") : `remote: 
 store: git
 active: 
 `;
@@ -39,14 +39,13 @@ function ensureConfig() {
   mkdirSync(STORE_DIR, { recursive: true });
   mkdirSync(AMEND_DIR, { recursive: true });
   if (!existsSync(CONFIG_FILE)) {
-    writeConfig("remote", "jubalm/folio");
+    writeConfig("remote", "");
     writeConfig("store", "git");
     writeConfig("active", "");
   }
 }
 function getActive() {
-  const val = readConfig("active");
-  return val && val !== "" ? val : null;
+  return readConfig("active");
 }
 function setActive(topic) {
   writeConfig("active", topic);
@@ -161,7 +160,7 @@ function listAmendments() {
   const { stdout } = run(`ls -1 "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
   if (!stdout)
     return results;
-  const remote = getRemote();
+  const remote = readConfig("remote");
   const topics = [];
   const topicBranches = new Map;
   for (const topic of stdout.split(`
@@ -176,7 +175,7 @@ function listAmendments() {
       topicBranches.set(topic, branch);
     topics.push(topic);
   }
-  const prMap = batchPRs(remote);
+  const prMap = remote ? batchPRs(remote) : new Map;
   for (const topic of topics) {
     const path = `${AMEND_DIR}/${topic}`;
     const dirty = isDirty(path);
@@ -229,7 +228,7 @@ function cmdBind(args) {
     console.log(`Already bound to ${remote}.`);
     return;
   }
-  if (currentRemote && currentRemote !== "jubalm/folio") {
+  if (currentRemote && currentRemote !== remote) {
     if (!args.includes("--force")) {
       throw new Error(`Currently bound to ${currentRemote}. All amendments will be lost. Use --force to re-bind.`);
     }
@@ -517,6 +516,11 @@ function cmdDrop(args) {
 }
 function cmdStatus() {
   ensureConfig();
+  const remote = readConfig("remote");
+  if (!remote) {
+    console.log("No repo bound. Run 'folio bind <ns/repo>' to get started.");
+    return;
+  }
   const active = getActive();
   if (!active) {
     console.log("on main — no open amendments.");
@@ -527,8 +531,8 @@ function cmdStatus() {
         console.log("  (uncommitted edits in store/leaves/ — did you mean to amend?)");
       }
     }
-    const remote2 = readConfig("remote");
-    if (remote2 && mainExists()) {
+    const remoteBound = readConfig("remote");
+    if (remoteBound && mainExists()) {
       const behind = behindCount();
       if (behind > 0) {
         console.log(`  behind remote by ${behind} commit(s). Run 'folio sync'.`);
@@ -565,7 +569,6 @@ function cmdStatus() {
       console.log(`  behind main by ${behind} commit(s)`);
     }
   }
-  const remote = readConfig("remote");
   if (remote && branch && branch !== "?") {
     const ghCheck = run("which gh 2>/dev/null", { quiet: true });
     if (ghCheck.exitCode === 0) {

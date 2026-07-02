@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { AMEND_DIR, BASE_REPO, getRemote } from "./config";
+import { AMEND_DIR, BASE_REPO, getRemote, readConfig } from "./config";
 
 // ── Shell ──────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ export function listAmendments(): {
 	const { stdout } = run(`ls -1 "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
 	if (!stdout) return results;
 
-	const remote = getRemote();
+	const remote = readConfig("remote");
 
 	// Collect branch names first, then batch-fetch PRs in one gh call.
 	const topics: string[] = [];
@@ -167,7 +167,7 @@ export function listAmendments(): {
 		topics.push(topic);
 	}
 
-	const prMap = batchPRs(remote);
+	const prMap = remote ? batchPRs(remote) : new Map<string, string>();
 
 	for (const topic of topics) {
 		const path = `${AMEND_DIR}/${topic}`;

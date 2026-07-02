@@ -6,9 +6,11 @@ Part of the [bytebroshq/folio](https://github.com/bytebroshq/folio) monorepo. Re
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) or Node.js 22+
+- [Node.js](https://nodejs.org) 22+
 - `git`
 - `gh` (GitHub CLI, [authenticated](https://cli.github.com))
+
+([Bun](https://bun.sh) is only needed for development — rebuilding `dist/folio.js` from source.)
 
 ## Install
 

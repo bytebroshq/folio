@@ -53,7 +53,7 @@ export function cmdBind(args: string[]): void {
 		return;
 	}
 
-	if (currentRemote && currentRemote !== "jubalm/folio") {
+	if (currentRemote && currentRemote !== remote) {
 		if (!args.includes("--force")) {
 			throw new Error(
 				`Currently bound to ${currentRemote}. All amendments will be lost. Use --force to re-bind.`,
@@ -518,6 +518,12 @@ export function cmdDrop(args: string[]): void {
 export function cmdStatus(): void {
 	ensureConfig();
 
+	const remote = readConfig("remote");
+	if (!remote) {
+		console.log("No repo bound. Run 'folio bind <ns/repo>' to get started.");
+		return;
+	}
+
 	const active = getActive();
 
 	if (!active) {
@@ -542,8 +548,8 @@ export function cmdStatus(): void {
 			}
 		}
 
-		const remote = readConfig("remote");
-		if (remote && mainExists()) {
+		const remoteBound = readConfig("remote");
+		if (remoteBound && mainExists()) {
 			const behind = behindCount();
 			if (behind > 0) {
 				console.log(
@@ -590,7 +596,6 @@ export function cmdStatus(): void {
 	}
 
 	// PR
-	const remote = readConfig("remote");
 	if (remote && branch && branch !== "?") {
 		const ghCheck = run("which gh 2>/dev/null", { quiet: true });
 		if (ghCheck.exitCode === 0) {

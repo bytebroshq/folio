@@ -21,6 +21,13 @@ detect_rc() {
 echo "folio: installing to $FOLIO_HOME/bin"
 mkdir -p "$FOLIO_HOME/bin" "$FOLIO_HOME/lib"
 
+# Check for Node.js
+if ! command -v node &> /dev/null; then
+  echo "folio: Node.js is required but not found."
+  echo "       Install from https://nodejs.org (v22+) and re-run this script."
+  exit 1
+fi
+
 # Download pre-built JS
 echo "folio: downloading..."
 curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/folio.js" -o "$DOWNLOAD"
@@ -50,8 +57,12 @@ else
 fi
 
 echo ""
-folio status 2>/dev/null || echo "folio — knowledge management CLI"
+echo "folio installed. Next step:"
 echo ""
+echo "  folio bind <ns/repo>   # bind to a knowledge repo (one-time setup)"
+echo "  folio status            # then check state anytime"
+echo ""
+echo "Commands:"
 echo "  folio bind <ns/repo> [--web]   # bind to a knowledge repo"
 echo "  folio switch [-c <topic>]      # list or create amendments"
 echo "  folio sync [-m \"msg\"]          # submit/update draft PR"

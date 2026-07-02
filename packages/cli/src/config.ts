@@ -9,21 +9,32 @@ export const BASE_REPO = `${STORE_DIR}/.main`;
 
 export type ConfigKey = "remote" | "store" | "active" | "web";
 
+/**
+ * Read a config value, or the whole file when no key is given.
+ *
+ * Returns null for a missing key OR an empty value, so callers can rely on
+ * truthiness. Whitespace matching stays on a single line ([^\S\n], not \s,
+ * which would otherwise cross line boundaries and capture the next entry).
+ */
 export function readConfig(key?: ConfigKey): string | null {
 	if (!existsSync(CONFIG_FILE)) return null;
 
 	const raw = readFileSync(CONFIG_FILE, "utf-8");
-	if (key) {
-		const match = raw.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
-		return match ? match[1].trim() : null;
-	}
-	return raw;
+	if (!key) return raw;
+
+	const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
+	const val = match ? match[1].trim() : null;
+	return val && val !== "" ? val : null;
 }
 
+/**
+ * Write a config value, creating a clean (remote-less) file on first write.
+ * A fresh install has no remote until `folio bind` sets one.
+ */
 export function writeConfig(key: ConfigKey, value: string): void {
 	const file = existsSync(CONFIG_FILE)
 		? readFileSync(CONFIG_FILE, "utf-8")
-		: `remote: jubalm/folio\nstore: git\nactive: \n`;
+		: "remote: \nstore: git\nactive: \n";
 
 	const regex = new RegExp(`^${key}:.*$`, "m");
 	const line = `${key}: ${value}`;
@@ -35,21 +46,24 @@ export function writeConfig(key: ConfigKey, value: string): void {
 	writeFileSync(CONFIG_FILE, updated, "utf-8");
 }
 
+/**
+ * Ensure the folio home directory structure and a clean config exist.
+ * Does NOT seed a remote — bind chooses it.
+ */
 export function ensureConfig(): void {
 	mkdirSync(FOLIO_HOME, { recursive: true });
 	mkdirSync(STORE_DIR, { recursive: true });
 	mkdirSync(AMEND_DIR, { recursive: true });
 
 	if (!existsSync(CONFIG_FILE)) {
-		writeConfig("remote", "jubalm/folio");
+		writeConfig("remote", "");
 		writeConfig("store", "git");
 		writeConfig("active", "");
 	}
 }
 
 export function getActive(): string | null {
-	const val = readConfig("active");
-	return val && val !== "" ? val : null;
+	return readConfig("active");
 }
 
 export function setActive(topic: string): void {
