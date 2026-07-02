@@ -46,8 +46,12 @@ echo "folio: installing dependencies..."
 bun install --cwd "$CACHE_DIR" --frozen-lockfile --quiet 2>/dev/null || bun install --cwd "$CACHE_DIR" --quiet
 
 # --- Build standalone binary ---
+BUILD_DIR="$(mktemp -d)"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
 echo "folio: building binary..."
-bun build --compile "$CACHE_DIR/packages/cli/src/index.ts" --outfile="$TARGET" 2>/dev/null
+bun build --compile "$CACHE_DIR/packages/cli/src/index.ts" --outfile="$BUILD_DIR/folio"
+mv "$BUILD_DIR/folio" "$TARGET"
 chmod +x "$TARGET"
 
 # --- Ensure on PATH ---
