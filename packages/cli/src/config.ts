@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
-export const FOLIO_HOME = `${homedir()}/.config/folio`;
+export const FOLIO_HOME =
+	process.env.FOLIO_HOME || `${homedir()}/.config/folio`;
 export const STORE_DIR = `${FOLIO_HOME}/stores`;
 export const AMEND_DIR = `${STORE_DIR}/amendments`;
 export const CONFIG_FILE = `${FOLIO_HOME}/config.yml`;
 export const BASE_REPO = `${STORE_DIR}/.main`;
 
-export type ConfigKey = "remote" | "store" | "active" | "web";
+export type ConfigKey = "remote" | "store" | "active" | "web" | "source";
 
 /**
  * Read a config value, or the whole file when no key is given.
@@ -91,4 +93,30 @@ export function getRemote(): string {
 	if (!remote)
 		throw new Error("no remote configured — run 'folio bind <ns/repo>'");
 	return remote;
+}
+
+// ── Local (in-place) binding ────────────────────────────────────────
+
+export function getSource(): string | null {
+	return readConfig("source");
+}
+
+/** True when bound in place to a local git repo instead of a GitHub remote. */
+export function isLocal(): boolean {
+	return !!getSource();
+}
+
+/**
+ * The repo that main lives in: the bound local repo in local mode,
+ * otherwise the managed clone.
+ */
+export function baseRepo(): string {
+	return getSource() ?? BASE_REPO;
+}
+
+/** Expand a leading ~ and resolve to an absolute path. */
+export function resolvePath(p: string): string {
+	const expanded =
+		p === "~" || p.startsWith("~/") ? `${homedir()}${p.slice(1)}` : p;
+	return resolve(expanded);
 }

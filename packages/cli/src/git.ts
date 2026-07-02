@@ -1,6 +1,14 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { AMEND_DIR, BASE_REPO, getRemote, readConfig } from "./config";
+import {
+	AMEND_DIR,
+	BASE_REPO,
+	baseRepo,
+	getRemote,
+	getSource,
+	isLocal,
+	readConfig,
+} from "./config";
 
 // ── Shell ──────────────────────────────────────────────────────────
 
@@ -43,9 +51,30 @@ export function gh(
 	return run(`gh ${args} --repo "${repo}"`, { quiet: true });
 }
 
-// ── Base clone ─────────────────────────────────────────────────────
+// ── Base repo ──────────────────────────────────────────────────────
+
+/**
+ * The ref amendments branch from and rebase onto.
+ * Local mode has no origin; main is the local branch itself.
+ */
+export function mainRef(): string {
+	return isLocal() ? "main" : "origin/main";
+}
 
 export function ensureBase(remote?: string): void {
+	const source = getSource();
+	if (source) {
+		if (!existsSync(`${source}/.git`)) {
+			throw new Error(
+				`Bound local folio missing at ${source}. Re-run 'folio bind <path>'.`,
+			);
+		}
+		run(`git -C "${source}" config extensions.worktreeConfig true`, {
+			quiet: true,
+		});
+		return;
+	}
+
 	const repo = remote ?? getRemote();
 
 	if (existsSync(`${BASE_REPO}/.git`)) {
@@ -64,25 +93,40 @@ export function ensureBase(remote?: string): void {
 }
 
 export function mainExists(): boolean {
-	return existsSync(`${BASE_REPO}/.git`);
+	return existsSync(`${baseRepo()}/.git`);
 }
 
 export function fetchMain(): void {
+	if (isLocal()) return;
 	run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
 }
 
 export function currentBranch(): string {
-	return run(`git -C "${BASE_REPO}" rev-parse --abbrev-ref HEAD`, {
+	return run(`git -C "${baseRepo()}" rev-parse --abbrev-ref HEAD`, {
 		quiet: true,
 	}).stdout;
 }
 
 export function behindCount(): number {
+	if (isLocal()) return 0;
 	const result = run(
 		`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`,
 		{ quiet: true },
 	);
 	return Number.parseInt(result.stdout || "0", 10);
+}
+
+/** Whether an amendment branch has been merged into main. */
+export function isMergedToMain(branch: string): boolean {
+	fetchMain();
+	const flag = isLocal() ? "" : "-r ";
+	const needle = isLocal() ? branch : `origin/${branch}`;
+	return (
+		run(
+			`git -C "${baseRepo()}" branch ${flag}--merged ${mainRef()} 2>/dev/null | grep -q "${needle}" && echo yes || echo no`,
+			{ quiet: true },
+		).stdout === "yes"
+	);
 }
 
 // ── Amendment helpers ──────────────────────────────────────────────
