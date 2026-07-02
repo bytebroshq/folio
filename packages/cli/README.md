@@ -1,88 +1,182 @@
-# @folio/cli
+# Folio CLI
 
-Knowledge management over git. A Bun/Node CLI — works from anywhere.
+A local-first CLI for working with a Folio knowledge repo.
 
-Part of the [bytebroshq/folio](https://github.com/bytebroshq/folio) monorepo. Replaces the [bash prototype](https://github.com/jubalm/folio-cli).
-
-## Prerequisites
-
-- [Node.js](https://nodejs.org) 22+
-- `git`
-- `gh` (GitHub CLI, [authenticated](https://cli.github.com))
-
-([Bun](https://bun.sh) is only needed for development — rebuilding `dist/folio.js` from source.)
+Folio keeps your knowledgebase in git. You edit locally, isolate changes in amendments, and publish amendments as draft pull requests for review.
 
 ## Install
 
-### curl | bash (recommended)
+Prerequisites:
+
+- Node.js 22+
+- git
+- GitHub CLI: `gh auth login`
+
+Install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 ```
 
-Downloads a pre-built JS bundle (24KB) and installs it to `~/.config/folio/bin/folio`. Requires [Node.js](https://nodejs.org) 22+ and the [`gh` CLI](https://cli.github.com). No Bun needed.
+The installer places `folio` at:
 
-### From source (dev)
+```bash
+~/.config/folio/bin/folio
+```
+
+A fresh install is not bound to any repo. Start by binding your knowledge repo:
+
+```bash
+folio bind <owner/repo>
+```
+
+Example:
+
+```bash
+folio bind bytebroshq/knowledge
+```
+
+## Mental model
+
+Folio has one bound git repo.
+
+```text
+~/.config/folio/
+  config.yml
+  stores/
+    .main/                 # canonical checkout of the bound repo
+    amendments/
+      my-topic/             # isolated worktree for one amendment
+```
+
+You normally do not edit `.main` directly. You create an amendment, edit files in that amendment, then sync it to a draft PR.
+
+## Basic workflow
+
+Bind once:
+
+```bash
+folio bind <owner/repo>
+```
+
+Create an amendment:
+
+```bash
+folio switch -c my-topic
+```
+
+Edit files here:
+
+```bash
+~/.config/folio/stores/amendments/my-topic/leaves/
+```
+
+Check state:
+
+```bash
+folio status
+```
+
+Publish or update the draft PR:
+
+```bash
+folio sync -m "describe the change"
+```
+
+List amendments:
+
+```bash
+folio list
+```
+
+Switch amendments:
+
+```bash
+folio switch my-topic
+```
+
+Drop an amendment:
+
+```bash
+folio drop my-topic --force
+```
+
+## Commands
+
+```text
+folio bind <owner/repo> [--web]      bind this machine to a knowledge repo
+folio status                         show current state
+folio list                           list local amendments
+folio switch                         list local amendments
+folio switch -c <topic>              create and enter an amendment
+folio switch <topic>                 enter an existing amendment
+folio sync [-m "message"]            commit, rebase, push, and open/update draft PR
+folio drop <topic> --force           delete a local amendment and its remote branch
+folio web                            open the web review surface
+folio config                         show config
+folio config <key> <value>           set config
+```
+
+## Web
+
+The CLI can open Folio Web for the bound repo:
+
+```bash
+folio web
+```
+
+Set the Web URL:
+
+```bash
+folio config web https://folio-web.bytebros.workers.dev
+```
+
+`folio bind --web <owner/repo>` binds locally, then opens the repo in Folio Web.
+
+The CLI does not manage GitHub App installation or web auth. It opens the repo URL; the Web app handles login, setup, and review.
+
+## Config
+
+Show config:
+
+```bash
+folio config
+```
+
+Fresh config starts clean:
+
+```yaml
+remote:
+store: git
+active:
+```
+
+Set values:
+
+```bash
+folio config web https://folio-web.bytebros.workers.dev
+```
+
+Rebind to a different repo:
+
+```bash
+folio bind <owner/repo> --force
+```
+
+Rebinding removes the local store and amendments for the previous repo.
+
+## Development
+
+Build the distributable JS file:
 
 ```bash
 cd packages/cli
 bun install
 bun run build
-# create a wrapper: echo 'exec node "$PWD/dist/folio.js" "$@"' > ~/.config/folio/bin/folio
 ```
 
-## Commands
+The installer downloads the prebuilt file from:
 
+```text
+packages/cli/dist/folio.js
 ```
-folio bind <ns/repo> [--web]     One-time: clone + auth check (+ open Web)
-folio switch                      List amendments (* = active)
-folio switch -c <topic>           Create + switch to a new amendment
-folio switch <topic>              Switch to an existing amendment (rebases onto main)
-folio status                      On main | amendment: <topic> — dirty/clean/PR
-folio sync [-m "msg"]             Push: commit → rebase → force-push → draft PR
-folio drop <topic> --force        Abandon an amendment (close PR + delete branches)
-folio config                      Show global config
-folio config <key> [<value>]      Get or set a config value
-folio list                        List all amendments with status and PR
-folio web [--no-open|--print-url] Open Folio Web or print URL
-```
-
-## Quick start
-
-```bash
-# One-time setup
-folio bind jubalm/folio
-
-# See what's going on
-folio status
-folio list
-
-# Start an amendment
-folio switch -c my-topic
-# edit leaves in ~/.config/folio/stores/amendments/my-topic/leaves/
-folio sync -m "why this matters"   # submits a draft PR
-
-# Later, abandon or switch
-folio drop my-topic --force
-```
-
-## Web integration
-
-Configure a Folio Web URL for rich review:
-
-```bash
-folio config web https://folio-web.bytebros.workers.dev
-folio web                          # opens browser to repo page
-```
-
-The Web handles auth and GitHub App install flow on first visit. The CLI stays intentionally dumb — its job ends at opening the URL.
-
-## Performance vs bash prototype
-
-- Batch PR lookup: single `gh pr list` call instead of one per amendment
-- Lazy fetch: `git fetch` only runs on commands that need it (`sync`, `switch -c`, `switch <topic>`)
-- Listing commands (`switch`, `list`, `status`) skip network when possible
-
-## How it works
-
-Amendments are git worktrees of a single canonical clone at `~/.config/folio/stores/.main/`. Each amendment lives in `stores/amendments/<topic>/` and syncs as its own draft PR. Rebase-always keeps history linear.
