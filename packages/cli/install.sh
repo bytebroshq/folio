@@ -8,6 +8,7 @@ REPO="bytebroshq/folio"
 BRANCH="main"
 FOLIO_HOME="$HOME/.config/folio"
 TARGET="$FOLIO_HOME/bin/folio"
+DOWNLOAD="$FOLIO_HOME/lib/folio.js"
 
 detect_rc() {
   case "${SHELL:-}" in
@@ -17,44 +18,22 @@ detect_rc() {
   esac
 }
 
-echo "folio: installing to $TARGET"
-mkdir -p "$FOLIO_HOME/bin"
+echo "folio: installing to $FOLIO_HOME/bin"
+mkdir -p "$FOLIO_HOME/bin" "$FOLIO_HOME/lib"
 
-# --- Install Bun if missing ---
-if ! command -v bun &> /dev/null; then
-  echo "folio: installing bun (JavaScript runtime)..."
-  curl -fsSL https://bun.sh/install | bash
-  # bun install adds to ~/.bun/bin; source it for this script
-  export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
+# Download pre-built JS
+echo "folio: downloading..."
+curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/folio.js" -o "$DOWNLOAD"
+chmod +x "$DOWNLOAD"
 
-# --- Clone repo shallowly into a cache dir ---
-CACHE_DIR="$FOLIO_HOME/lib/cli"
-if [[ -d "$CACHE_DIR/.git" ]]; then
-  echo "folio: updating CLI source..."
-  git -C "$CACHE_DIR" fetch origin "$BRANCH" --depth=1 --quiet
-  git -C "$CACHE_DIR" reset --hard "origin/$BRANCH" --quiet
-else
-  echo "folio: downloading CLI source..."
-  rm -rf "$CACHE_DIR"
-  git clone --depth=1 --branch "$BRANCH" "https://github.com/$REPO.git" "$CACHE_DIR" --quiet
-fi
-
-# --- Install dependencies ---
-echo "folio: installing dependencies..."
-bun install --cwd "$CACHE_DIR" --frozen-lockfile --quiet 2>/dev/null || bun install --cwd "$CACHE_DIR" --quiet
-
-# --- Build standalone binary ---
-BUILD_DIR="$(mktemp -d)"
-trap 'rm -rf "$BUILD_DIR"' EXIT
-
-echo "folio: building binary..."
-bun build --compile "$CACHE_DIR/packages/cli/src/index.ts" --outfile="$BUILD_DIR/folio"
-mv "$BUILD_DIR/folio" "$TARGET"
+# Create wrapper
+cat > "$TARGET" << WRAPPER
+#!/usr/bin/env bash
+exec node "$DOWNLOAD" "\$@"
+WRAPPER
 chmod +x "$TARGET"
 
-# --- Ensure on PATH ---
+# Ensure on PATH
 if command -v folio &> /dev/null; then
   echo "folio: already on PATH ($(which folio))"
 else

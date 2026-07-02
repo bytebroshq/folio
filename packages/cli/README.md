@@ -18,14 +18,15 @@ Part of the [bytebroshq/folio](https://github.com/bytebroshq/folio) monorepo. Re
 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 ```
 
-This installs [Bun](https://bun.sh) (if missing), clones the repo, and builds a standalone binary at `~/.config/folio/bin/folio`. Adds the directory to PATH in your shell rc.
+Downloads a pre-built JS bundle (24KB) and installs it to `~/.config/folio/bin/folio`. Requires [Node.js](https://nodejs.org) 22+ and the [`gh` CLI](https://cli.github.com). No Bun needed.
 
-### Via Bun (dev)
+### From source (dev)
 
 ```bash
 cd packages/cli
 bun install
-# create a wrapper: echo 'exec bun run "$PWD/src/index.ts" "$@"' > ~/.config/folio/bin/folio
+bun run build
+# create a wrapper: echo 'exec node "$PWD/dist/folio.js" "$@"' > ~/.config/folio/bin/folio
 ```
 
 ## Commands
