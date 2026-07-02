@@ -115,8 +115,17 @@ Recommended fields:
 | Field | Purpose |
 |---|---|
 | `title` | Human-readable title. |
+| `description` | One-sentence summary for previews and index generation. |
+| `type` | Short string naming the kind of leaf. Used for routing and filtering. |
 | `tags` | Short labels for filtering and grouping. |
 | `date` | Date of the original decision or capture, when useful. |
+| `resource` | URI identifying an external asset the leaf describes, when one exists. |
+
+These names align with OKF frontmatter where the two formats overlap, so a
+leaf that carries them is closer to portable across profiles. See §12.
+
+`type` values are folio-local. A folio SHOULD define its `type` vocabulary in
+`SCHEMA.md`. Consumers MUST NOT reject a leaf for an unknown `type`.
 
 Additional fields MAY be used. Consumers SHOULD preserve unknown fields.
 
@@ -361,6 +370,32 @@ usability warning, not a conformance failure.
 The linter MUST be mechanical. It MUST NOT use semantic ranking, retrieval, or
 LLM inference to decide whether the folio is valid.
 
+### 11.1 Lint profiles
+
+A linter SHOULD organize its rules into named profiles. A profile is a rule
+set plus the conventions those rules assume (reserved filenames, link syntax,
+required frontmatter).
+
+| Profile | Assumes | Requires |
+|---|---|---|
+| `folio` | This specification. The default. | Rules 1–7 above. |
+| `okf` | OKF bundle conventions. | Parseable frontmatter with non-empty `type`; reserved `index.md` / `log.md` structure; tolerated broken links. |
+
+Selection order:
+
+1. An explicit flag: `folio lint --spec okf`.
+2. Detection: a root `index.md` declaring `okf_version` selects `okf`.
+3. Otherwise `folio` is the default.
+
+Profiles are strict about their own rules and silent about the other
+profile's rules. Running the `folio` profile against an OKF bundle is a user
+error, not a conformance failure of the bundle.
+
+A profile MAY add advisory checks beyond its conformance rules (for example,
+the `okf` profile MAY warn on broken links even though OKF consumers must
+tolerate them). Advisory output MUST be distinguishable from conformance
+failures.
+
 ---
 
 ## 12. Compatibility
@@ -372,7 +407,13 @@ standard Markdown links, required `type` fields, lowercase `index.md`, or looser
 link validation.
 
 Folio tooling SHOULD support other profiles explicitly rather than weakening
-Folio rules.
+Folio rules. Lint profiles (§11.1) are the mechanism: each profile enforces
+its own conventions in full instead of a lowest common denominator.
+
+Where field names overlap with OKF (`title`, `description`, `type`, `tags`,
+`resource`), Folio uses the same names and meanings (§4.1). Folio's `date`
+and OKF's `timestamp` differ: `date` records when the captured fact occurred;
+`timestamp` records when the document last meaningfully changed.
 
 Compatibility should be additive:
 
