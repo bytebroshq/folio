@@ -1,7 +1,0 @@
-{
-	"name": "@folio/skill",
-	"version": "0.0.1",
-	"description": "Agent skill for reading, writing, linting, and reviewing Folio knowledgebases.",
-	"files": ["SKILL.md", "README.md", "writing.md", "linting.md", "pr-workflow.md"],
-	"keywords": ["folio", "skill", "agent", "markdown", "knowledgebase"]
-}

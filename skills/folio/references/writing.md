@@ -7,10 +7,10 @@ and links over directories.
 
 Use deterministic namespace prefixes for collision prevention:
 
-- product pages: `project-*.md`
+- Folio product pages: `folio-*.md`
+- Lituus pages: `lituus-*.md`
 - people pages: `people-*.md`
 - reusable patterns: `patterns-*.md`
-- team or workspace pages: `team-*.md`
 
 One level of nesting is acceptable when a catalog grows. Deeper nesting should be
 a last resort because paths cost tokens, reduce grep-ability, and add link churn.
@@ -57,7 +57,7 @@ Use draft pull requests as the amendment record.
 ## Rationale
 
 - review happens before the change is published
-- the review system stores comments, diffs, commits, and authorship
+- GitHub stores comments, diffs, commits, and authorship
 - merged `main` stays canonical
 ```
 
@@ -72,8 +72,8 @@ We discussed several possible options and eventually landed on the idea that PRs
 Prefer bare bracket links:
 
 ```md
-[[project-roadmap]]
-[[team-projects]]
+[[folio-roadmap]]
+[[lituus-projects]]
 ```
 
 Use shallow folio-root-relative path links only when directories are useful:
