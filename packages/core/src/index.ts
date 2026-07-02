@@ -50,3 +50,20 @@ export type PRDetail = PRSummary & {
 	diff: string;
 	comments: { author: string; body: string }[];
 };
+
+export type {
+	LintIssue,
+	LintOptions,
+	LintResult,
+	LintSeverity,
+	LintSpec,
+} from "./lint";
+export {
+	errorCount,
+	getLintSpec,
+	hasLintErrors,
+	lint,
+	listLintSpecs,
+	printLintResult,
+	warningCount,
+} from "./lint";

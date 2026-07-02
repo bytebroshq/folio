@@ -39,9 +39,10 @@ Usage:
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
   folio web --no-open              Print URL only
-  folio lint                       Check knowledge graph integrity
+  folio lint                       Check folio integrity
+  folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
-  folio lint --strict              Exit 1 if any issues
+  folio lint --strict              Exit 1 if any errors
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 folio sync opens a draft PR; merge via folio web.

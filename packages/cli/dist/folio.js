@@ -3,8 +3,404 @@
 // src/commands.ts
 import { existsSync as existsSync3 } from "node:fs";
 
+// ../core/src/lint/checks/frontmatter.ts
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+function frontmatterCheck(ctx) {
+  const issues = [];
+  for (const file of ctx.files.allMdFiles) {
+    const content = readFileSync(file, "utf-8");
+    if (!content.startsWith("---"))
+      continue;
+    const rel = relative(ctx.storeDir, file);
+    const match = content.match(FRONTMATTER_RE);
+    if (!match) {
+      issues.push({
+        check: "frontmatter",
+        severity: "error",
+        file: rel,
+        line: 1,
+        message: "opens with '---' but no closing '---' found"
+      });
+      continue;
+    }
+    const lines = match[1].split(`
+`);
+    for (let i = 0;i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith("\t")) {
+        issues.push({
+          check: "frontmatter",
+          severity: "error",
+          file: rel,
+          line: i + 2,
+          message: "tab-indented YAML (use spaces)"
+        });
+      } else if (line.trim() !== "" && !line.includes(":") && !line.startsWith(" ") && !line.startsWith("-")) {
+        issues.push({
+          check: "frontmatter",
+          severity: "error",
+          file: rel,
+          line: i + 2,
+          message: `unexpected line: '${line.trim()}'`
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+// ../core/src/lint/checks/links.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename as basename2, relative as relative2 } from "node:path";
+
+// ../core/src/lint/files.ts
+import { readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
+function exists(path) {
+  return !!statSync(path, { throwIfNoEntry: false });
+}
+function walkMdFiles(dir, spec) {
+  const results = [];
+  const s = statSync(dir, { throwIfNoEntry: false });
+  if (!s?.isDirectory())
+    return results;
+  const ignoredDirs = new Set(spec.ignoredDirs);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && ignoredDirs.has(entry.name))
+      continue;
+    if (entry.name.startsWith("."))
+      continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkMdFiles(full, spec));
+    } else if (entry.name.endsWith(".md")) {
+      results.push(full);
+    }
+  }
+  return results.sort();
+}
+function rootMdFiles(storeDir) {
+  const results = [];
+  for (const entry of readdirSync(storeDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      results.push(join(storeDir, entry.name));
+    }
+  }
+  return results.sort();
+}
+function collectFiles(storeDir, spec) {
+  const allMdFiles = walkMdFiles(storeDir, spec);
+  const rootFiles = rootMdFiles(storeDir);
+  const structural = new Set(spec.structuralFiles);
+  return {
+    allMdFiles,
+    rootMdFiles: rootFiles,
+    contentLeafFiles: allMdFiles.filter((file) => !structural.has(basename(file)))
+  };
+}
+
+// ../core/src/lint/links.ts
+import { resolve } from "node:path";
+var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+function extractWikilinks(content) {
+  const results = [];
+  const lines = content.split(`
+`);
+  for (let i = 0;i < lines.length; i++) {
+    for (const match of lines[i].matchAll(WIKILINK_RE)) {
+      results.push({ link: match[1].trim(), line: i + 1 });
+    }
+  }
+  return results;
+}
+function cleanLinkTarget(link) {
+  return link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
+}
+function hasRelativePathMarker(link) {
+  const clean = cleanLinkTarget(link);
+  return clean === "." || clean === ".." || clean.startsWith("./") || clean.startsWith("../");
+}
+function isPathLink(link) {
+  const clean = cleanLinkTarget(link);
+  return clean.includes("/");
+}
+function targetPath(storeDir, link) {
+  const clean = cleanLinkTarget(link);
+  return resolve(storeDir, `${clean}.md`);
+}
+
+// ../core/src/lint/checks/links.ts
+function linkCheck(ctx) {
+  const issues = [];
+  let pathLinkCount = 0;
+  for (const file of ctx.files.allMdFiles) {
+    const rel = relative2(ctx.storeDir, file);
+    const content = readFileSync2(file, "utf-8");
+    for (const { link, line } of extractWikilinks(content)) {
+      if (hasRelativePathMarker(link)) {
+        issues.push({
+          check: "path-link",
+          severity: "error",
+          file: rel,
+          line,
+          message: `[[${link}]] uses a relative path marker; use a bare target or folio-root-relative path`
+        });
+        continue;
+      }
+      if (isPathLink(link))
+        pathLinkCount++;
+      const target = targetPath(ctx.storeDir, link);
+      if (!exists(target)) {
+        issues.push({
+          check: basename2(file) === "INDEX.md" ? "stale-index" : "broken-link",
+          severity: "error",
+          file: rel,
+          line,
+          message: `[[${link}]] → ${relative2(ctx.storeDir, target)} does not exist`
+        });
+      }
+    }
+  }
+  if (pathLinkCount > ctx.spec.pathLinkWarnThreshold) {
+    issues.push({
+      check: "path-link",
+      severity: "warn",
+      file: "(folio)",
+      message: `${pathLinkCount} path links found; path-heavy catalogs cost more to read, grep, and move`
+    });
+  }
+  return issues;
+}
+function duplicateIndexEntriesCheck(ctx) {
+  const issues = [];
+  const index = ctx.files.rootMdFiles.find((file) => basename2(file) === "INDEX.md");
+  if (!index)
+    return issues;
+  const seen = new Map;
+  for (const { link, line } of extractWikilinks(readFileSync2(index, "utf-8"))) {
+    const norm = cleanLinkTarget(link);
+    const lines = seen.get(norm) || [];
+    lines.push(line);
+    seen.set(norm, lines);
+  }
+  for (const [target, lines] of seen) {
+    if (lines.length > 1) {
+      issues.push({
+        check: "duplicate-index",
+        severity: "error",
+        file: "INDEX.md",
+        message: `${target} at lines ${lines.join(", ")}`
+      });
+    }
+  }
+  return issues;
+}
+function orphanLeavesCheck(ctx) {
+  const issues = [];
+  const index = ctx.files.rootMdFiles.find((file) => basename2(file) === "INDEX.md");
+  if (!index)
+    return issues;
+  const indexed = new Set;
+  for (const { link } of extractWikilinks(readFileSync2(index, "utf-8"))) {
+    if (!hasRelativePathMarker(link))
+      indexed.add(cleanLinkTarget(link));
+  }
+  for (const file of ctx.files.contentLeafFiles) {
+    const relNoExt = relative2(ctx.storeDir, file).replace(/\.md$/, "");
+    if (!indexed.has(relNoExt)) {
+      issues.push({
+        check: "orphan",
+        severity: "error",
+        file: relative2(ctx.storeDir, file),
+        message: "not referenced in root INDEX.md"
+      });
+    }
+  }
+  return issues;
+}
+
+// ../core/src/lint/checks/naming.ts
+import { basename as basename3, relative as relative3 } from "node:path";
+function namingCheck(ctx) {
+  const issues = [];
+  const structural = new Set(ctx.spec.structuralFiles);
+  for (const file of ctx.files.contentLeafFiles) {
+    const name = basename3(file);
+    if (structural.has(name))
+      continue;
+    if (!ctx.spec.leafFilenamePattern.test(name)) {
+      issues.push({
+        check: "naming",
+        severity: "error",
+        file: relative3(ctx.storeDir, file),
+        message: `leaf filename must be ${ctx.spec.leafFilenameDescription}`
+      });
+    }
+  }
+  return issues;
+}
+
+// ../core/src/lint/checks/size.ts
+import { statSync as statSync2 } from "node:fs";
+import { relative as relative4 } from "node:path";
+function fmtBytes(n) {
+  if (n < 1024)
+    return `${n}B`;
+  if (n < 1048576)
+    return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1048576).toFixed(1)}MB`;
+}
+function leafSizeCheck(ctx) {
+  const issues = [];
+  for (const file of ctx.files.contentLeafFiles) {
+    const bytes = statSync2(file).size;
+    const tokens = Math.round(bytes / 4);
+    if (tokens > ctx.spec.leafTokenWarn) {
+      issues.push({
+        check: "leaf-size",
+        severity: "warn",
+        file: relative4(ctx.storeDir, file),
+        message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${ctx.spec.leafTokenWarn.toLocaleString()})`
+      });
+    }
+  }
+  return issues;
+}
+
+// ../core/src/lint/checks/structure.ts
+import { join as join2, relative as relative5 } from "node:path";
+function structureCheck(ctx) {
+  const issues = [];
+  for (const requiredFile of ctx.spec.requiredRootFiles) {
+    if (!exists(join2(ctx.storeDir, requiredFile))) {
+      issues.push({
+        check: "structure",
+        severity: "error",
+        file: requiredFile,
+        message: `missing required root ${requiredFile}`
+      });
+    }
+  }
+  return issues;
+}
+function nestingCheck(ctx) {
+  const issues = [];
+  for (const file of ctx.files.allMdFiles) {
+    const rel = relative5(ctx.storeDir, file);
+    const depth = rel.split("/").length - 1;
+    if (depth > ctx.spec.maxPreferredNestingDepth) {
+      issues.push({
+        check: "nesting",
+        severity: "warn",
+        file: rel,
+        message: `deeply nested Markdown file; ${ctx.spec.label} favors flat or shallow structure`
+      });
+    }
+  }
+  return issues;
+}
+
+// ../core/src/lint/specs.ts
+var folioSpec = {
+  id: "folio",
+  label: "Folio Knowledge Format",
+  requiredRootFiles: ["INDEX.md", "SCHEMA.md"],
+  structuralFiles: [
+    "INDEX.md",
+    "SCHEMA.md",
+    "AGENTS.md",
+    "README.md",
+    "SPEC.md"
+  ],
+  ignoredDirs: [".git", "node_modules", "dist", "build", ".wrangler"],
+  leafFilenamePattern: /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/,
+  leafFilenameDescription: "kebab-case filename, e.g. folio-roadmap.md",
+  maxPreferredNestingDepth: 1,
+  pathLinkWarnThreshold: 10,
+  leafTokenWarn: 1e4
+};
+var specs = new Map([[folioSpec.id, folioSpec]]);
+function getLintSpec(id = "folio") {
+  const spec = specs.get(id);
+  if (!spec) {
+    throw new Error(`Unknown lint spec '${id}'. Available specs: ${listLintSpecs().join(", ")}`);
+  }
+  return spec;
+}
+function listLintSpecs() {
+  return [...specs.keys()].sort();
+}
+
+// ../core/src/lint/reporters/text.ts
+var CHECK_GROUPS = [
+  { label: "STRUCTURE", key: "structure" },
+  { label: "NAMING", key: "naming" },
+  { label: "NESTING", key: "nesting" },
+  { label: "PATH LINKS", key: "path-link" },
+  { label: "BROKEN LINKS", key: "broken-link" },
+  { label: "STALE INDEX ENTRIES", key: "stale-index" },
+  { label: "ORPHAN LEAVES", key: "orphan" },
+  { label: "DUPLICATE INDEX ENTRIES", key: "duplicate-index" },
+  { label: "LEAF SIZE", key: "leaf-size" },
+  { label: "FRONTMATTER", key: "frontmatter" }
+];
+function errorCount(result) {
+  return result.issues.filter((issue) => issue.severity === "error").length;
+}
+function warningCount(result) {
+  return result.issues.filter((issue) => issue.severity === "warn").length;
+}
+function printLintResult(result) {
+  let total = 0;
+  for (const { label, key } of CHECK_GROUPS) {
+    const group = result.issues.filter((issue) => issue.check === key);
+    total += group.length;
+    console.log(`${label} (${group.length})`);
+    for (const issue of group) {
+      const loc = issue.line ? `${issue.file}:${issue.line}` : issue.file;
+      const prefix = issue.severity === "warn" ? "warn" : "error";
+      console.log(`  ${loc}  [${prefix}] ${issue.message}`);
+    }
+  }
+  console.log("");
+  if (total === 0) {
+    console.log("No issues found.");
+    return;
+  }
+  const errors = errorCount(result);
+  const warnings = warningCount(result);
+  console.log(`${errors} error(s), ${warnings} warning(s) found.`);
+}
+
+// ../core/src/lint/index.ts
+var checks = [
+  structureCheck,
+  namingCheck,
+  nestingCheck,
+  linkCheck,
+  orphanLeavesCheck,
+  duplicateIndexEntriesCheck,
+  leafSizeCheck,
+  frontmatterCheck
+];
+function lint(storeDir, options = {}) {
+  const spec = getLintSpec(options.spec);
+  const files = collectFiles(storeDir, spec);
+  if (files.allMdFiles.length === 0)
+    return { spec: spec.id, issues: [] };
+  const ctx = { storeDir, files, spec };
+  return {
+    spec: spec.id,
+    issues: checks.flatMap((check) => check(ctx))
+  };
+}
+function hasLintErrors(result) {
+  return result.issues.some((issue) => issue.severity === "error");
+}
 // src/config.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 var FOLIO_HOME = `${homedir()}/.config/folio`;
 var STORE_DIR = `${FOLIO_HOME}/stores`;
@@ -14,7 +410,7 @@ var BASE_REPO = `${STORE_DIR}/.main`;
 function readConfig(key) {
   if (!existsSync(CONFIG_FILE))
     return null;
-  const raw = readFileSync(CONFIG_FILE, "utf-8");
+  const raw = readFileSync3(CONFIG_FILE, "utf-8");
   if (!key)
     return raw;
   const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
@@ -22,7 +418,7 @@ function readConfig(key) {
   return val && val !== "" ? val : null;
 }
 function writeConfig(key, value) {
-  const file = existsSync(CONFIG_FILE) ? readFileSync(CONFIG_FILE, "utf-8") : `remote: 
+  const file = existsSync(CONFIG_FILE) ? readFileSync3(CONFIG_FILE, "utf-8") : `remote: 
 store: git
 active: 
 `;
@@ -202,310 +598,6 @@ function listOpenPRs(remote) {
     return [];
   return result.stdout.split(`
 `);
-}
-
-// src/lint.ts
-import { readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
-var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
-var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
-var DEFAULT_TOKEN_WARN = 1e4;
-var STRUCTURAL_FILES = new Set([
-  "INDEX.md",
-  "SCHEMA.md",
-  "AGENTS.md",
-  "README.md"
-]);
-function walkMdFiles(dir) {
-  const results = [];
-  const s = statSync(dir, { throwIfNoEntry: false });
-  if (!s?.isDirectory())
-    return results;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === ".git" || entry.name.startsWith("."))
-      continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...walkMdFiles(full));
-    } else if (entry.name.endsWith(".md")) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-function rootMdFiles(storeDir) {
-  const results = [];
-  for (const entry of readdirSync(storeDir, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".md")) {
-      results.push(join(storeDir, entry.name));
-    }
-  }
-  return results.sort();
-}
-function contentLeafFiles(storeDir) {
-  return rootMdFiles(storeDir).filter((file) => !STRUCTURAL_FILES.has(basename(file)));
-}
-function extractWikilinks(content) {
-  const results = [];
-  const lines = content.split(`
-`);
-  for (let i = 0;i < lines.length; i++) {
-    for (const match of lines[i].matchAll(WIKILINK_RE)) {
-      results.push({ link: match[1].trim(), line: i + 1 });
-    }
-  }
-  return results;
-}
-function targetPath(storeDir, link) {
-  const clean = link.replace(/#.*$/, "");
-  return resolve(storeDir, clean.endsWith(".md") ? clean : `${clean}.md`);
-}
-function exists(p) {
-  return !!statSync(p, { throwIfNoEntry: false });
-}
-function fmtBytes(n) {
-  if (n < 1024)
-    return `${n}B`;
-  if (n < 1048576)
-    return `${(n / 1024).toFixed(1)}KB`;
-  return `${(n / 1048576).toFixed(1)}MB`;
-}
-function isPathLink(link) {
-  const clean = link.replace(/#.*$/, "");
-  return clean.includes("/") || clean.startsWith(".") || clean.startsWith("~");
-}
-function structureIssues(storeDir, allFiles) {
-  const issues = [];
-  if (!exists(join(storeDir, "INDEX.md"))) {
-    issues.push({
-      check: "structure",
-      file: "INDEX.md",
-      message: "missing required root INDEX.md"
-    });
-  }
-  if (!exists(join(storeDir, "SCHEMA.md"))) {
-    issues.push({
-      check: "structure",
-      file: "SCHEMA.md",
-      message: "missing required root SCHEMA.md"
-    });
-  }
-  for (const file of allFiles) {
-    const rel = relative(storeDir, file);
-    if (rel.includes("/")) {
-      issues.push({
-        check: "structure",
-        file: rel,
-        message: "nested Markdown file; Folio leaves must be flat at store root"
-      });
-    }
-  }
-  return issues;
-}
-function brokenLinks(storeDir, files) {
-  const issues = [];
-  for (const file of files) {
-    if (basename(file) === "INDEX.md")
-      continue;
-    const content = readFileSync2(file, "utf-8");
-    for (const { link, line } of extractWikilinks(content)) {
-      if (isPathLink(link)) {
-        issues.push({
-          check: "path-link",
-          file: relative(storeDir, file),
-          line,
-          message: `[[${link}]] uses a path; use bare flat name`
-        });
-        continue;
-      }
-      const target = targetPath(storeDir, link);
-      if (!exists(target)) {
-        issues.push({
-          check: "broken-link",
-          file: relative(storeDir, file),
-          line,
-          message: `[[${link}]] → ${relative(storeDir, target)} does not exist`
-        });
-      }
-    }
-  }
-  return issues;
-}
-function staleIndexEntries(storeDir) {
-  const issues = [];
-  const file = join(storeDir, "INDEX.md");
-  if (!exists(file))
-    return issues;
-  const content = readFileSync2(file, "utf-8");
-  for (const { link, line } of extractWikilinks(content)) {
-    if (isPathLink(link)) {
-      issues.push({
-        check: "path-link",
-        file: "INDEX.md",
-        line,
-        message: `[[${link}]] uses a path; use bare flat name`
-      });
-      continue;
-    }
-    const target = targetPath(storeDir, link);
-    if (!exists(target)) {
-      issues.push({
-        check: "stale-index",
-        file: "INDEX.md",
-        line,
-        message: `[[${link}]] → ${relative(storeDir, target)} does not exist`
-      });
-    }
-  }
-  return issues;
-}
-function orphanLeaves(storeDir) {
-  const issues = [];
-  const index = join(storeDir, "INDEX.md");
-  if (!exists(index))
-    return issues;
-  const indexed = new Set;
-  for (const { link } of extractWikilinks(readFileSync2(index, "utf-8"))) {
-    if (!isPathLink(link))
-      indexed.add(link.replace(/#.*$/, "").replace(/\.md$/, ""));
-  }
-  for (const file of contentLeafFiles(storeDir)) {
-    const relNoExt = basename(file, ".md");
-    if (!indexed.has(relNoExt)) {
-      issues.push({
-        check: "orphan",
-        file: basename(file),
-        message: "not referenced in root INDEX.md"
-      });
-    }
-  }
-  return issues;
-}
-function duplicateIndexEntries(storeDir) {
-  const issues = [];
-  const file = join(storeDir, "INDEX.md");
-  if (!exists(file))
-    return issues;
-  const content = readFileSync2(file, "utf-8");
-  const links = extractWikilinks(content);
-  const seen = new Map;
-  for (const { link, line } of links) {
-    const norm = link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
-    const lines = seen.get(norm) || [];
-    lines.push(line);
-    seen.set(norm, lines);
-  }
-  for (const [target, lines] of seen) {
-    if (lines.length > 1) {
-      issues.push({
-        check: "duplicate-index",
-        file: "INDEX.md",
-        message: `${target} at lines ${lines.join(", ")}`
-      });
-    }
-  }
-  return issues;
-}
-function leafSizeWarnings(storeDir, files) {
-  const issues = [];
-  for (const file of files) {
-    const bytes = statSync(file).size;
-    const tokens = Math.round(bytes / 4);
-    if (tokens > DEFAULT_TOKEN_WARN) {
-      issues.push({
-        check: "leaf-size",
-        file: relative(storeDir, file),
-        message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${DEFAULT_TOKEN_WARN.toLocaleString()})`
-      });
-    }
-  }
-  return issues;
-}
-function frontmatterErrors(storeDir, files) {
-  const issues = [];
-  for (const file of files) {
-    const content = readFileSync2(file, "utf-8");
-    if (!content.startsWith("---"))
-      continue;
-    const rel = relative(storeDir, file);
-    const m = content.match(FRONTMATTER_RE);
-    if (!m) {
-      issues.push({
-        check: "frontmatter",
-        file: rel,
-        line: 1,
-        message: "opens with '---' but no closing '---' found"
-      });
-      continue;
-    }
-    const fm = m[1];
-    const lines = fm.split(`
-`);
-    for (let i = 0;i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith("\t")) {
-        issues.push({
-          check: "frontmatter",
-          file: rel,
-          line: i + 2,
-          message: "tab-indented YAML (use spaces)"
-        });
-      } else if (line.trim() !== "" && !line.includes(":") && !line.startsWith(" ") && !line.startsWith("-")) {
-        issues.push({
-          check: "frontmatter",
-          file: rel,
-          line: i + 2,
-          message: `unexpected line: '${line.trim()}'`
-        });
-      }
-    }
-  }
-  return issues;
-}
-function lint(storeDir) {
-  const allFiles = walkMdFiles(storeDir);
-  const rootFiles = rootMdFiles(storeDir);
-  if (allFiles.length === 0)
-    return { issues: [] };
-  return {
-    issues: [
-      ...structureIssues(storeDir, allFiles),
-      ...brokenLinks(storeDir, rootFiles),
-      ...staleIndexEntries(storeDir),
-      ...orphanLeaves(storeDir),
-      ...duplicateIndexEntries(storeDir),
-      ...leafSizeWarnings(storeDir, rootFiles),
-      ...frontmatterErrors(storeDir, rootFiles)
-    ]
-  };
-}
-var CHECK_GROUPS = [
-  { label: "STRUCTURE", key: "structure" },
-  { label: "PATH LINKS", key: "path-link" },
-  { label: "BROKEN LINKS", key: "broken-link" },
-  { label: "STALE INDEX ENTRIES", key: "stale-index" },
-  { label: "ORPHAN LEAVES", key: "orphan" },
-  { label: "DUPLICATE INDEX ENTRIES", key: "duplicate-index" },
-  { label: "LEAF SIZE", key: "leaf-size" },
-  { label: "FRONTMATTER", key: "frontmatter" }
-];
-function printLintResult(result) {
-  let total = 0;
-  for (const { label, key } of CHECK_GROUPS) {
-    const group = result.issues.filter((i) => i.check === key);
-    total += group.length;
-    console.log(`${label} (${group.length})`);
-    for (const issue of group) {
-      const loc = issue.line ? `${issue.file}:${issue.line}` : issue.file;
-      console.log(`  ${loc}  ${issue.message}`);
-    }
-  }
-  console.log("");
-  if (total === 0) {
-    console.log("No issues found.");
-  } else {
-    console.log(`${total} issue(s) found.`);
-  }
 }
 
 // src/open.ts
@@ -952,6 +1044,11 @@ function cmdLint(args) {
   ensureConfig();
   const json = args.includes("--json");
   const strict = args.includes("--strict");
+  const specIdx = args.indexOf("--spec");
+  const spec = specIdx >= 0 ? args[specIdx + 1] : "folio";
+  if (specIdx >= 0 && !spec) {
+    throw new Error("Usage: folio lint [--spec folio] [--json] [--strict]");
+  }
   const active = getActive();
   let storeDir;
   if (active && existsSync3(`${AMEND_DIR}/${active}`)) {
@@ -961,13 +1058,13 @@ function cmdLint(args) {
   } else {
     throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
   }
-  const result = lint(storeDir);
+  const result = lint(storeDir, { spec });
   if (json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     printLintResult(result);
   }
-  if (strict && result.issues.length > 0) {
+  if (strict && hasLintErrors(result)) {
     process.exit(1);
   }
 }
@@ -994,9 +1091,10 @@ Usage:
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
   folio web --no-open              Print URL only
-  folio lint                       Check knowledge graph integrity
+  folio lint                       Check folio integrity
+  folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
-  folio lint --strict              Exit 1 if any issues
+  folio lint --strict              Exit 1 if any errors
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 folio sync opens a draft PR; merge via folio web.
