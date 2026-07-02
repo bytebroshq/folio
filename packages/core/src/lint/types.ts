@@ -37,6 +37,7 @@ export interface LintSpec {
 	label: string;
 	requiredRootFiles: string[];
 	structuralFiles: string[];
+	ignoredDirs: string[];
 	leafFilenamePattern: RegExp;
 	leafFilenameDescription: string;
 	maxPreferredNestingDepth: number;

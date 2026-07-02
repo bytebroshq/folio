@@ -6,16 +6,19 @@ export function exists(path: string): boolean {
 	return !!statSync(path, { throwIfNoEntry: false });
 }
 
-export function walkMdFiles(dir: string): string[] {
+export function walkMdFiles(dir: string, spec: LintSpec): string[] {
 	const results: string[] = [];
 	const s = statSync(dir, { throwIfNoEntry: false });
 	if (!s?.isDirectory()) return results;
 
+	const ignoredDirs = new Set(spec.ignoredDirs);
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === ".git" || entry.name.startsWith(".")) continue;
+		if (entry.isDirectory() && ignoredDirs.has(entry.name)) continue;
+		if (entry.name.startsWith(".")) continue;
+
 		const full = join(dir, entry.name);
 		if (entry.isDirectory()) {
-			results.push(...walkMdFiles(full));
+			results.push(...walkMdFiles(full, spec));
 		} else if (entry.name.endsWith(".md")) {
 			results.push(full);
 		}
@@ -35,7 +38,7 @@ export function rootMdFiles(storeDir: string): string[] {
 }
 
 export function collectFiles(storeDir: string, spec: LintSpec): LintFileSet {
-	const allMdFiles = walkMdFiles(storeDir);
+	const allMdFiles = walkMdFiles(storeDir, spec);
 	const rootFiles = rootMdFiles(storeDir);
 	const structural = new Set(spec.structuralFiles);
 	return {

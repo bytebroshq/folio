@@ -11,6 +11,7 @@ export const folioSpec: LintSpec = {
 		"README.md",
 		"SPEC.md",
 	],
+	ignoredDirs: [".git", "node_modules", "dist", "build", ".wrangler"],
 	leafFilenamePattern: /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/,
 	leafFilenameDescription: "kebab-case filename, e.g. folio-roadmap.md",
 	maxPreferredNestingDepth: 1,

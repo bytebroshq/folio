@@ -262,17 +262,20 @@ import { basename, join } from "node:path";
 function exists(path) {
   return !!statSync(path, { throwIfNoEntry: false });
 }
-function walkMdFiles(dir) {
+function walkMdFiles(dir, spec) {
   const results = [];
   const s = statSync(dir, { throwIfNoEntry: false });
   if (!s?.isDirectory())
     return results;
+  const ignoredDirs = new Set(spec.ignoredDirs);
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === ".git" || entry.name.startsWith("."))
+    if (entry.isDirectory() && ignoredDirs.has(entry.name))
+      continue;
+    if (entry.name.startsWith("."))
       continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...walkMdFiles(full));
+      results.push(...walkMdFiles(full, spec));
     } else if (entry.name.endsWith(".md")) {
       results.push(full);
     }
@@ -289,7 +292,7 @@ function rootMdFiles(storeDir) {
   return results.sort();
 }
 function collectFiles(storeDir, spec) {
-  const allMdFiles = walkMdFiles(storeDir);
+  const allMdFiles = walkMdFiles(storeDir, spec);
   const rootFiles = rootMdFiles(storeDir);
   const structural = new Set(spec.structuralFiles);
   return {
@@ -512,6 +515,7 @@ var folioSpec = {
     "README.md",
     "SPEC.md"
   ],
+  ignoredDirs: [".git", "node_modules", "dist", "build", ".wrangler"],
   leafFilenamePattern: /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/,
   leafFilenameDescription: "kebab-case filename, e.g. folio-roadmap.md",
   maxPreferredNestingDepth: 1,
