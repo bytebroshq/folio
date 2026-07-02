@@ -51,17 +51,16 @@ function extractWikilinks(content: string): { link: string; line: number }[] {
 }
 
 function resolveLinkTarget(
-	leavesDir: string,
+	_leavesDir: string,
 	sourceFile: string,
 	link: string,
 ): string {
 	const clean = link.replace(/#.*$/, ""); // strip fragments
-	let target: string;
-	if (clean.startsWith(".") || clean.startsWith("/")) {
-		target = resolve(dirname(sourceFile), clean);
-	} else {
-		target = resolve(leavesDir, clean);
-	}
+	// All wikilinks resolve relative to the source file's directory
+	// [[roadmap]] from folio/about.md → folio/roadmap.md
+	// [[people/jubal]] from root → people/jubal.md
+	// [[../workspace/os]] from folio/about.md → workspace/os.md
+	let target = resolve(dirname(sourceFile), clean);
 	if (!target.endsWith(".md")) target += ".md";
 	return target;
 }

@@ -237,14 +237,9 @@ function extractWikilinks(content) {
   }
   return results;
 }
-function resolveLinkTarget(leavesDir, sourceFile, link) {
+function resolveLinkTarget(_leavesDir, sourceFile, link) {
   const clean = link.replace(/#.*$/, "");
-  let target;
-  if (clean.startsWith(".") || clean.startsWith("/")) {
-    target = resolve(dirname(sourceFile), clean);
-  } else {
-    target = resolve(leavesDir, clean);
-  }
+  let target = resolve(dirname(sourceFile), clean);
   if (!target.endsWith(".md"))
     target += ".md";
   return target;
