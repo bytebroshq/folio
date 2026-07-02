@@ -9,6 +9,7 @@ import {
 	cmdBind,
 	cmdConfig,
 	cmdDrop,
+	cmdLint,
 	cmdList,
 	cmdStatus,
 	cmdSwitch,
@@ -38,6 +39,9 @@ Usage:
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
   folio web --no-open              Print URL only
+  folio lint                       Check knowledge graph integrity
+  folio lint --json                Machine-readable output
+  folio lint --strict              Exit 1 if any issues
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/leaves/.
 folio sync opens a draft PR; merge via folio web.
@@ -73,6 +77,9 @@ try {
 			break;
 		case "web":
 			cmdWeb(args);
+			break;
+		case "lint":
+			cmdLint(args);
 			break;
 		case undefined:
 		case "-h":

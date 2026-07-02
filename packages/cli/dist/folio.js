@@ -204,6 +204,253 @@ function listOpenPRs(remote) {
 `);
 }
 
+// src/lint.ts
+import { readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
+var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+var DEFAULT_TOKEN_WARN = 1e4;
+function walkMdFiles(dir) {
+  const results = [];
+  const s = statSync(dir, { throwIfNoEntry: false });
+  if (!s?.isDirectory())
+    return results;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkMdFiles(full));
+    } else if (entry.name.endsWith(".md")) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+function extractWikilinks(content) {
+  const results = [];
+  const lines = content.split(`
+`);
+  for (let i = 0;i < lines.length; i++) {
+    WIKILINK_RE.lastIndex = 0;
+    for (const match of lines[i].matchAll(WIKILINK_RE)) {
+      results.push({ link: match[1].trim(), line: i + 1 });
+    }
+  }
+  return results;
+}
+function resolveLinkTarget(leavesDir, sourceFile, link) {
+  const clean = link.replace(/#.*$/, "");
+  let target;
+  if (clean.startsWith(".") || clean.startsWith("/")) {
+    target = resolve(dirname(sourceFile), clean);
+  } else {
+    target = resolve(leavesDir, clean);
+  }
+  if (!target.endsWith(".md"))
+    target += ".md";
+  return target;
+}
+function exists(p) {
+  return !!statSync(p, { throwIfNoEntry: false });
+}
+function fmtBytes(n) {
+  if (n < 1024)
+    return `${n}B`;
+  if (n < 1048576)
+    return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1048576).toFixed(1)}MB`;
+}
+function brokenLinks(leavesDir, files) {
+  const issues = [];
+  for (const file of files) {
+    if (basename(file) === "INDEX.md")
+      continue;
+    const content = readFileSync2(file, "utf-8");
+    for (const { link, line } of extractWikilinks(content)) {
+      const target = resolveLinkTarget(leavesDir, file, link);
+      if (!exists(target)) {
+        issues.push({
+          check: "broken-link",
+          file: relative(leavesDir, file),
+          line,
+          message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`
+        });
+      }
+    }
+  }
+  return issues;
+}
+function staleIndexEntries(leavesDir, files) {
+  const issues = [];
+  for (const file of files) {
+    if (basename(file) !== "INDEX.md")
+      continue;
+    const content = readFileSync2(file, "utf-8");
+    const rel = relative(leavesDir, file);
+    for (const { link, line } of extractWikilinks(content)) {
+      const target = resolveLinkTarget(leavesDir, file, link);
+      if (!exists(target)) {
+        issues.push({
+          check: "stale-index",
+          file: rel,
+          line,
+          message: `[[${link}]] → ${relative(leavesDir, target)} does not exist`
+        });
+      }
+    }
+  }
+  return issues;
+}
+function orphanLeaves(leavesDir, files) {
+  const issues = [];
+  const indexed = new Set;
+  for (const file of files) {
+    if (basename(file) !== "INDEX.md")
+      continue;
+    const content = readFileSync2(file, "utf-8");
+    for (const { link } of extractWikilinks(content)) {
+      const target = resolveLinkTarget(leavesDir, file, link);
+      indexed.add(relative(leavesDir, target).replace(/\.md$/, ""));
+    }
+  }
+  for (const file of files) {
+    const name = basename(file);
+    if (name === "INDEX.md" || name === "SCHEMA.md")
+      continue;
+    const relNoExt = relative(leavesDir, file).replace(/\.md$/, "");
+    if (!indexed.has(relNoExt)) {
+      issues.push({
+        check: "orphan",
+        file: relative(leavesDir, file),
+        message: "not referenced in any INDEX.md"
+      });
+    }
+  }
+  return issues;
+}
+function duplicateIndexEntries(leavesDir, files) {
+  const issues = [];
+  for (const file of files) {
+    if (basename(file) !== "INDEX.md")
+      continue;
+    const content = readFileSync2(file, "utf-8");
+    const links = extractWikilinks(content);
+    const seen = new Map;
+    for (const { link, line } of links) {
+      const norm = link.replace(/\.md$/, "").trim();
+      const lines = seen.get(norm) || [];
+      lines.push(line);
+      seen.set(norm, lines);
+    }
+    for (const [target, lines] of seen) {
+      if (lines.length > 1) {
+        issues.push({
+          check: "duplicate-index",
+          file: relative(leavesDir, file),
+          message: `${target}  at lines ${lines.join(", ")}`
+        });
+      }
+    }
+  }
+  return issues;
+}
+function leafSizeWarnings(leavesDir, files) {
+  const issues = [];
+  for (const file of files) {
+    const bytes = statSync(file).size;
+    const tokens = Math.round(bytes / 4);
+    if (tokens > DEFAULT_TOKEN_WARN) {
+      issues.push({
+        check: "leaf-size",
+        file: relative(leavesDir, file),
+        message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${DEFAULT_TOKEN_WARN.toLocaleString()})`
+      });
+    }
+  }
+  return issues;
+}
+function frontmatterErrors(leavesDir, files) {
+  const issues = [];
+  for (const file of files) {
+    const content = readFileSync2(file, "utf-8");
+    if (!content.startsWith("---"))
+      continue;
+    const rel = relative(leavesDir, file);
+    const m = content.match(FRONTMATTER_RE);
+    if (!m) {
+      issues.push({
+        check: "frontmatter",
+        file: rel,
+        line: 1,
+        message: "opens with '---' but no closing '---' found"
+      });
+      continue;
+    }
+    const fm = m[1];
+    const lines = fm.split(`
+`);
+    for (let i = 0;i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith("\t")) {
+        issues.push({
+          check: "frontmatter",
+          file: rel,
+          line: i + 2,
+          message: "tab-indented YAML (use spaces)"
+        });
+      } else if (line.trim() !== "" && !line.includes(":") && !line.startsWith(" ") && !line.startsWith("-")) {
+        issues.push({
+          check: "frontmatter",
+          file: rel,
+          line: i + 2,
+          message: `unexpected line: '${line.trim()}'`
+        });
+      }
+    }
+  }
+  return issues;
+}
+function lint(leavesDir) {
+  const files = walkMdFiles(leavesDir);
+  if (files.length === 0)
+    return { issues: [] };
+  return {
+    issues: [
+      ...brokenLinks(leavesDir, files),
+      ...staleIndexEntries(leavesDir, files),
+      ...orphanLeaves(leavesDir, files),
+      ...duplicateIndexEntries(leavesDir, files),
+      ...leafSizeWarnings(leavesDir, files),
+      ...frontmatterErrors(leavesDir, files)
+    ]
+  };
+}
+var CHECK_GROUPS = [
+  { label: "BROKEN LINKS", key: "broken-link" },
+  { label: "STALE INDEX ENTRIES", key: "stale-index" },
+  { label: "ORPHAN LEAVES", key: "orphan" },
+  { label: "DUPLICATE INDEX ENTRIES", key: "duplicate-index" },
+  { label: "LEAF SIZE", key: "leaf-size" },
+  { label: "FRONTMATTER", key: "frontmatter" }
+];
+function printLintResult(result) {
+  let total = 0;
+  for (const { label, key } of CHECK_GROUPS) {
+    const group = result.issues.filter((i) => i.check === key);
+    total += group.length;
+    console.log(`${label} (${group.length})`);
+    for (const issue of group) {
+      const loc = issue.line ? `${issue.file}:${issue.line}` : issue.file;
+      console.log(`  ${loc}  ${issue.message}`);
+    }
+  }
+  console.log("");
+  if (total === 0) {
+    console.log("No issues found.");
+  } else {
+    console.log(`${total} issue(s) found.`);
+  }
+}
+
 // src/open.ts
 function openBrowser(url) {
   try {
@@ -647,6 +894,29 @@ function cmdList() {
     console.log(tableRow(marker, a.topic, a.status, a.pr || ""));
   }
 }
+function cmdLint(args) {
+  ensureConfig();
+  const json = args.includes("--json");
+  const strict = args.includes("--strict");
+  const active = getActive();
+  let leavesDir;
+  if (active && existsSync3(`${AMEND_DIR}/${active}/leaves`)) {
+    leavesDir = `${AMEND_DIR}/${active}/leaves`;
+  } else if (mainExists()) {
+    leavesDir = `${BASE_REPO}/leaves`;
+  } else {
+    throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
+  }
+  const result = lint(leavesDir);
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    printLintResult(result);
+  }
+  if (strict && result.issues.length > 0) {
+    process.exit(1);
+  }
+}
 
 // src/index.ts
 function die(msg) {
@@ -670,6 +940,9 @@ Usage:
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
   folio web --no-open              Print URL only
+  folio lint                       Check knowledge graph integrity
+  folio lint --json                Machine-readable output
+  folio lint --strict              Exit 1 if any issues
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/leaves/.
 folio sync opens a draft PR; merge via folio web.
@@ -703,6 +976,9 @@ try {
       break;
     case "web":
       cmdWeb(args);
+      break;
+    case "lint":
+      cmdLint(args);
       break;
     case undefined:
     case "-h":

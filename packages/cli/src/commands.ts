@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import {
+	AMEND_DIR,
 	amendmentPath,
 	BASE_REPO,
 	type ConfigKey,
@@ -26,6 +27,7 @@ import {
 	run,
 	worktreeExists,
 } from "./git";
+import { lint, printLintResult } from "./lint";
 import { openBrowser } from "./open";
 
 // ── Formatting helpers ──────────────────────────────────────────────
@@ -705,5 +707,37 @@ export function cmdList(): void {
 	for (const a of amendments) {
 		const marker = a.topic === active ? "*" : " ";
 		console.log(tableRow(marker, a.topic, a.status, a.pr || ""));
+	}
+}
+
+// ── lint ───────────────────────────────────────────────────────────
+
+export function cmdLint(args: string[]): void {
+	ensureConfig();
+
+	const json = args.includes("--json");
+	const strict = args.includes("--strict");
+
+	const active = getActive();
+	let leavesDir: string;
+
+	if (active && existsSync(`${AMEND_DIR}/${active}/leaves`)) {
+		leavesDir = `${AMEND_DIR}/${active}/leaves`;
+	} else if (mainExists()) {
+		leavesDir = `${BASE_REPO}/leaves`;
+	} else {
+		throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
+	}
+
+	const result = lint(leavesDir);
+
+	if (json) {
+		console.log(JSON.stringify(result, null, 2));
+	} else {
+		printLintResult(result);
+	}
+
+	if (strict && result.issues.length > 0) {
+		process.exit(1);
 	}
 }
