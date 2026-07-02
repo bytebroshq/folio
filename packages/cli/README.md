@@ -18,11 +18,19 @@ Install:
 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 ```
 
-The installer places `folio` at:
+By default, the installer places `folio` at:
 
 ```bash
-~/.config/folio/bin/folio
+~/.local/bin/folio
 ```
+
+Use a custom install directory with `FOLIO_BIN_DIR`:
+
+```bash
+FOLIO_BIN_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+```
+
+If the install directory is not on `PATH`, the installer updates your shell rc when possible and prints the `export PATH=...` command for the current terminal.
 
 A fresh install is not bound to any repo. Start by binding your knowledge repo:
 

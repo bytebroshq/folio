@@ -3,11 +3,14 @@ set -euo pipefail
 
 # folio CLI install script
 #   curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+#
+# Custom bin dir:
+#   FOLIO_BIN_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 
 REPO="bytebroshq/folio"
 BRANCH="main"
-FOLIO_HOME="$HOME/.config/folio"
-TARGET="$FOLIO_HOME/bin/folio"
+BIN_DIR="${FOLIO_BIN_DIR:-$HOME/.local/bin}"
+TARGET="$BIN_DIR/folio"
 
 detect_rc() {
   case "${SHELL:-}" in
@@ -17,8 +20,23 @@ detect_rc() {
   esac
 }
 
-echo "folio: installing to $FOLIO_HOME/bin"
-mkdir -p "$FOLIO_HOME/bin"
+path_contains() {
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+quote_for_rc() {
+  if [[ "$1" == "$HOME"* ]]; then
+    printf '$HOME%s' "${1#"$HOME"}"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+echo "folio: installing to $TARGET"
+mkdir -p "$BIN_DIR"
 
 # Check for Node.js
 if ! command -v node &> /dev/null; then
@@ -34,19 +52,24 @@ curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/fo
 chmod +x "$TARGET"
 
 # Ensure on PATH
-if command -v folio &> /dev/null; then
-  echo "folio: already on PATH ($(which folio))"
+if path_contains "$BIN_DIR"; then
+  echo "folio: installed and available on PATH"
 else
   rc="$(detect_rc || true)"
-  if [[ -n "$rc" ]] && ! grep -q '\.config/folio/bin' "$rc" 2>/dev/null; then
+  rc_path="$(quote_for_rc "$BIN_DIR")"
+  if [[ -n "$rc" ]] && ! grep -Fq "$BIN_DIR" "$rc" 2>/dev/null && ! grep -Fq "$rc_path" "$rc" 2>/dev/null; then
     echo "" >> "$rc"
-    echo 'export PATH="$HOME/.config/folio/bin:$PATH"' >> "$rc"
-    echo "folio: added \$HOME/.config/folio/bin to PATH in $rc"
-    echo "       source $rc or open a new terminal"
+    echo "export PATH=\"$rc_path:\$PATH\"" >> "$rc"
+    echo "folio: added $rc_path to PATH in $rc"
   else
-    echo "folio: installed at $TARGET"
-    echo "       add to PATH: export PATH=\"\$HOME/.config/folio/bin:\$PATH\""
+    echo "folio: installed, but $BIN_DIR is not on PATH"
   fi
+  echo ""
+  echo "To use folio in this terminal now, run:"
+  echo ""
+  echo "  export PATH=\"$rc_path:\$PATH\""
+  echo ""
+  echo "Or open a new terminal."
 fi
 
 echo ""
