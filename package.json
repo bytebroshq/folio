@@ -5,7 +5,8 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "skills/*"
   ],
   "scripts": {
     "dev": "bun run --filter @folio/web dev",
