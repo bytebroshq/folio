@@ -8,7 +8,6 @@ REPO="bytebroshq/folio"
 BRANCH="main"
 FOLIO_HOME="$HOME/.config/folio"
 TARGET="$FOLIO_HOME/bin/folio"
-DOWNLOAD="$FOLIO_HOME/lib/folio.js"
 
 detect_rc() {
   case "${SHELL:-}" in
@@ -19,7 +18,7 @@ detect_rc() {
 }
 
 echo "folio: installing to $FOLIO_HOME/bin"
-mkdir -p "$FOLIO_HOME/bin" "$FOLIO_HOME/lib"
+mkdir -p "$FOLIO_HOME/bin"
 
 # Check for Node.js
 if ! command -v node &> /dev/null; then
@@ -28,16 +27,10 @@ if ! command -v node &> /dev/null; then
   exit 1
 fi
 
-# Download pre-built JS
+# Download pre-built JS directly as the executable. It has a Node shebang,
+# so normal invocations do not go through a bash wrapper.
 echo "folio: downloading..."
-curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/folio.js" -o "$DOWNLOAD"
-chmod +x "$DOWNLOAD"
-
-# Create wrapper
-cat > "$TARGET" << WRAPPER
-#!/usr/bin/env bash
-exec node "$DOWNLOAD" "\$@"
-WRAPPER
+curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/folio.js" -o "$TARGET"
 chmod +x "$TARGET"
 
 # Ensure on PATH

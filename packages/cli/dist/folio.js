@@ -1,5 +1,4 @@
-#!/usr/bin/env bun
-// @bun
+#!/usr/bin/env node
 
 // src/commands.ts
 import { existsSync as existsSync3 } from "node:fs";
@@ -656,7 +655,7 @@ function die(msg) {
 }
 function help() {
   console.log(`
-folio \u2014 knowledge management CLI
+folio — knowledge management CLI
 
 Usage:
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
@@ -664,7 +663,7 @@ Usage:
   folio switch <topic>            Switch to an existing amendment
   folio switch -c <topic>          Create a new amendment (--force to re-create)
   folio status                     Show current state (main | amendment)
-  folio sync [-m "msg"]            Pull main \u2192 rebase \u2192 commit \u2192 push \u2192 draft PR
+  folio sync [-m "msg"]            Pull main → rebase → commit → push → draft PR
   folio drop <topic> --force       Delete an amendment (local + remote)
   folio list                       List all amendments
   folio config                     Show global config
