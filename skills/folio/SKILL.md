@@ -13,9 +13,25 @@ and git — the `folio` CLI is an optional accelerator, not a requirement.
 
 Full specification: <https://github.com/bytebroshq/folio/blob/main/SPEC.md>.
 
+## Car vs. gas — know which repo you're in
+
+Two different things are both called "folio," and confusing them is the most
+common orientation failure:
+
+- **The car** — `bytebroshq/folio`. The *tooling*: CLI source, FKF spec, and
+  **this skill's own source**. Edited like any code repo (branch + PR); the
+  folio CLI does not manage it.
+- **The gas** — a knowledge collection (e.g. `jubalm/folio`). Markdown leaves
+  governed by FKF. **This is what the CLI operates on.** You `folio bind` to
+  a gas repo, never to the car.
+
+If you're editing *knowledge*, you're in a gas repo and the CLI applies. If
+you're editing *the CLI, spec, or skill*, you're in the car and plain git
+applies. The CLI never binds to itself.
+
 ## The format
 
-A folio is a directory of Markdown **leaves** plus two required root files:
+A folio (gas) is a directory of Markdown **leaves** plus two required root files:
 
 - `INDEX.md` — the folio map, with useful descriptions (not a bare file list)
 - `SCHEMA.md` — local conventions: naming, tags, placement, anti-patterns
@@ -32,43 +48,88 @@ Conventions:
 
 - Merged `main` is published truth.
 - Amendments (branches / draft PRs) are **pending** knowledge: surface them
-  when relevant, never silently adopt them as truth.
+  when relevant, never silently adopt them as truth. **Branch existence is
+  not pendingness** — squash-merged PRs leave their branch behind. Check PR
+  state (open vs. merged vs. closed), not `git branch`.
 - Keep deltas small and topical — one amendment per coherent change.
+
+## How the CLI works (the model, not the verbs)
+
+This section teaches the **operating model** — stable across releases. For
+the current verb surface and flags, run `folio --help` (and
+`folio <verb> --help`); that output is canonical and this file deliberately
+does not duplicate it, so it cannot drift out of date.
+
+### Three concepts in any bound folio
+
+1. **Strategy** — *how* the CLI operates: GitHub mode (bound to a `remote`
+   like `owner/repo`) or local mode (bound to a `source` filesystem path).
+   This is the only difference that predicts what `proof`/`publish` will do.
+2. **Local copy** — where main lives on disk: a managed clone
+   (`stores/.main`) in GitHub mode, or the bound directory itself in local
+   mode.
+3. **Remote** — the GitHub repo backing it, if any. `None` in local mode.
+
+`folio config` shows these. `folio status` orients you and is the command to
+run first when unsure — it fetches (GitHub mode) and names the next action.
+
+### The CLI is your API — treat its output as a contract
+
+- **The CLI is canonical for its own behavior.** When you have a question
+  about what a command does, what's bound, or what state you're in, ask the
+  CLI. Do not reconstruct its model from prose output, leaf text, or the
+  binary source.
+- **Parse output literally; prefer machine-readable flags** like `--json`
+  where they exist. Do not free-associate over prose rows.
+- **Reach for the CLI, not git.** Every folio operation has a verb. Do not
+  `cd` into the store, do not run raw `git branch` / `git log` / `git show`
+  against the store to answer questions the CLI already answers
+  (`folio status`, `folio list`, `folio config`). Raw git on the store is the
+  single most reliable way to misread pending vs. published truth.
+- **Never mark a PR ready** (`gh pr ready`) — flipping a draft PR to ready is
+  a human-only act.
 
 ## Workflow
 
-1. Get oriented: read `INDEX.md` and `SCHEMA.md`, then the relevant leaves.
-2. Check for open amendments/PRs touching your topic; treat them as pending.
-3. To edit, make an amendment and follow one of the paths below.
+1. **Pick your path** — run `folio --version`. If it resolves, follow the CLI
+   path below. If not, follow the manual path. The CLI path is preferred
+   whenever available.
+2. **Get oriented** — read `INDEX.md` and `SCHEMA.md`, then the relevant
+   leaves. In CLI mode, also run `folio status` first; it fetches and reports
+   state, then names the next verb.
+3. **Check for open amendments/PRs** touching your topic; treat them as
+   pending. Use the CLI's draft listing (or GitHub PR state), not `git branch`.
+4. **To edit**, make an amendment via one of the paths below.
 
-## Editing: two paths
+### CLI path (preferred when `folio` is installed)
 
-**With the CLI** (check `which folio`) — the ritual, automated:
+The verbs exist to automate the amendment ritual. **For the verb surface,
+flags, and exact output shape, run `folio --help` — it is canonical.** By
+role:
 
-```bash
-folio draft <topic>   # amendment branch + draft worktree
-# edit leaves in the draft store
-folio save -m "short message"
-folio proof           # lint + rebase; push + draft PR (GitHub mode) or diff (local)
-folio publish         # only after a human marks the PR ready
-```
+- **Orient** — the command that reports current state and the next action.
+- **Amend** — the loop: open an amendment on a topic, edit leaves in its
+  worktree, save, proof (lint + rebase + push/draft PR), publish after a
+  human marks the PR ready.
+- **Establish the world** — bind to a remote or local path, or scaffold a
+  new folio.
 
-**Without the CLI** — the same ritual by hand: branch, edit, lint manually,
-draft PR, human-approved squash merge. Full recipe in
-`references/pr-workflow.md`; manual lint checklist in `references/linting.md`.
+The manual recipe in `references/pr-workflow.md` is the same ritual by hand
+and doubles as the *rationale* for why the verbs are shaped this way.
 
-Either way: never run `gh pr ready` — flipping a draft PR to ready is a
-human-only act.
+### Manual path (no CLI)
+
+Branch, edit, lint by hand (`references/linting.md`), open a draft PR,
+human-approved squash merge. Full recipe in `references/pr-workflow.md`.
 
 ## CLI freshness check
 
 This skill was written against folio CLI **0.0.1** (frontmatter stamp).
-Before relying on CLI specifics, compare with `folio --version`. If the
-versions differ — or the flag is unknown (older CLI) — verify verbs against
-`folio --help` instead of trusting this file, and if the installed CLI
-offers `folio skill install`, point it at this skill's directory to refresh
-these files from the CLI's embedded copy, then re-read them before
-continuing.
+Compare with `folio --version`. If the versions differ — or the flag is
+unknown (older CLI) — verify verbs against `folio --help` instead of trusting
+this file, and if the installed CLI offers `folio skill install`, point it at
+this skill's directory to refresh these files from the CLI's embedded copy,
+then re-read them before continuing.
 
 To install the CLI:
 
