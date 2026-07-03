@@ -665,153 +665,206 @@ function openBrowser(url) {
 var skillBundle = {
   "SKILL.md": `---
 name: folio
-description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo.
+description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. Works with or without the folio CLI.
 metadata:
   folio-cli-version: 0.0.1
 ---
 
 # Folio skill
 
-Folio is a local-first Markdown knowledgebase managed with the \`folio\` CLI.
+Folio is a **Markdown knowledge format**: linked Markdown with a few strict
+conventions. A folio is readable and writable with nothing but a text editor
+and git — the \`folio\` CLI is an optional accelerator, not a requirement.
 
-## CLI requisite
+Full specification: <https://github.com/bytebroshq/folio/blob/main/SPEC.md>.
 
-Check it is installed: \`which folio\`
+## The format
 
-## Installation
+A folio is a directory of Markdown **leaves** plus two required root files:
 
-\`\`\`
-curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
-\`\`\`
+- \`INDEX.md\` — the folio map, with useful descriptions (not a bare file list)
+- \`SCHEMA.md\` — local conventions: naming, tags, placement, anti-patterns
 
-Follow the install completion for next step to complete setup.
+Conventions:
 
-## Getting Started
+- filenames are kebab-case; namespace prefixes prevent collisions (\`project-*\`, \`people-*\`, \`patterns-*\`)
+- flat or shallow structure is preferred; organization comes from filenames, frontmatter, \`INDEX.md\`, and links — deep nesting is a last resort
+- links between leaves use bracket syntax (wikilinks): \`[[project-roadmap]]\`; shallow folio-root-relative paths (\`[[clients/acme]]\`) only when directories are in use; never \`./\` or \`../\` markers
+- frontmatter is optional; when used, prefer the spec's shared fields: \`title\`, \`description\`, \`type\`, \`tags\`, \`date\`, \`resource\`
+- external URLs use regular Markdown links; leaf-to-leaf relationships never do
 
-\`folio --help\` - list commands and show path to store
+## Truth model
+
+- Merged \`main\` is published truth.
+- Amendments (branches / draft PRs) are **pending** knowledge: surface them
+  when relevant, never silently adopt them as truth.
+- Keep deltas small and topical — one amendment per coherent change.
 
 ## Workflow
 
-1. Check relevant leaves through \`INDEX.md\` and \`SCHEMA.md\`.
-2. Surface relevant open amendments/PRs as pending knowledge, but do not silently adopt them as truth.
-3. Treat merged \`main\` as published truth.
-4. If editing, use an amendment (\`folio draft <topic>\`) and keep deltas small.
-5. Flow: \`draft\` → edit → \`save\` → \`proof\` → \`publish\` (publish only after a human marks the PR ready).
+1. Get oriented: read \`INDEX.md\` and \`SCHEMA.md\`, then the relevant leaves.
+2. Check for open amendments/PRs touching your topic; treat them as pending.
+3. To edit, make an amendment and follow one of the paths below.
 
-## Conventions
+## Editing: two paths
 
-For the full format specification, see <https://github.com/bytebroshq/folio/blob/main/SPEC.md>.
+**With the CLI** (check \`which folio\`) — the ritual, automated:
 
-- \`INDEX.md\` maps the folio with useful descriptions
-- \`SCHEMA.md\` documents local conventions
+\`\`\`bash
+folio draft <topic>   # amendment branch + draft worktree
+# edit leaves in the draft store
+folio save -m "short message"
+folio proof           # lint + rebase; push + draft PR (GitHub mode) or diff (local)
+folio publish         # only after a human marks the PR ready
+\`\`\`
 
-- filenames are kebab-case
-- organization comes first from filenames, frontmatter, \`INDEX.md\`, and links
-- flat or shallow structure is preferred; deeper nesting should be a last resort
-- frontmatter is optional, but useful for filtering, grouping, and tooling
-- links use bracket syntax, commonly called wikilinks: \`[[project-roadmap]]\`
-- shallow folio-root-relative path links are allowed when directories are useful: \`[[clients/acme]]\`
-- avoid \`./\` and \`../\` path markers in bracket links
+**Without the CLI** — the same ritual by hand: branch, edit, lint manually,
+draft PR, human-approved squash merge. Full recipe in
+\`references/pr-workflow.md\`; manual lint checklist in \`references/linting.md\`.
 
-## Writing contract
+Either way: never run \`gh pr ready\` — flipping a draft PR to ready is a
+human-only act.
 
-See \`references/writing.md\`.
+## CLI freshness check
 
-## Linting contract
+This skill was written against folio CLI **0.0.1** (frontmatter stamp).
+Before relying on CLI specifics, compare with \`folio --version\`. If the
+versions differ — or the flag is unknown (older CLI) — verify verbs against
+\`folio --help\` instead of trusting this file, and if the installed CLI
+offers \`folio skill install\`, point it at this skill's directory to refresh
+these files from the CLI's embedded copy, then re-read them before
+continuing.
 
-See \`references/linting.md\`.
+To install the CLI:
 
-## PR workflow
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+\`\`\`
 
-See \`references/pr-workflow.md\`.
+## References
 
-## Reorg / consolidation
-
-When merging, retiring, or restructuring leaves, see \`references/reorg.md\`.
+- \`references/writing.md\` — writing contract: placement, leaf shape, style, index discipline
+- \`references/linting.md\` — conformance rules and how to check them, with or without the CLI
+- \`references/pr-workflow.md\` — amendment/publication ritual, manual and CLI forms
+- \`references/reorg.md\` — consolidating, merging, or retiring leaves
 `,
   "references/linting.md": `# Folio linting guide
 
-\`folio proof\` runs lint automatically. To lint standalone:
+Lint rules are conformance rules from SPEC.md §11 — properties of the files
+themselves, mechanical and deterministic. The CLI checks them fast; every one
+of them can also be verified by hand. Lint MUST NOT use semantic ranking,
+RAG, or LLM inference to decide validity.
 
-\`\`\`bash
-folio lint --strict
-\`\`\`
-
-Folio lint is mechanical and deterministic. It checks structure only:
+## The rules
 
 - root \`INDEX.md\` exists
 - root \`SCHEMA.md\` exists
 - filenames are kebab-case
 - bracket links resolve to existing \`.md\` files
-- relative path markers in bracket links (\`./\`, \`../\`)
-- stale index entries
-- orphan leaves
-- duplicate index entries
-- frontmatter shape, when present
-- oversized leaves
+- no relative path markers in bracket links (\`./\`, \`../\`)
+- no stale index entries (index links to deleted/renamed leaves)
+- no orphan leaves (leaf missing from \`INDEX.md\` without deliberate reason)
+- no duplicate index entries
+- frontmatter is well-formed YAML, when present
+- leaves are not oversized
 
-Flat or shallow structure is preferred, but nesting is not a format failure.
-A linter may warn about deep nesting or path-heavy catalogs as usability issues.
+Flat or shallow structure is preferred, but nesting is not a format failure —
+a linter may warn about deep nesting or path-heavy catalogs as usability
+issues. Strict lint fails on errors, not warnings.
 
-Strict lint should fail on errors, not warnings.
+## With the CLI
 
-It must not use semantic ranking, RAG, or LLM inference to decide validity.
+\`\`\`bash
+folio lint --strict        # fail on errors
+folio lint --json          # machine-readable output
+folio lint --spec folio    # select the Folio Knowledge Format profile explicitly
+folio lint --spec okf      # lint an OKF bundle by its own rules instead
+\`\`\`
 
-Use \`folio lint --json\` for machine-readable output.
-Use \`folio lint --spec folio\` to select the Folio Knowledge Format explicitly.
+\`folio proof\` runs lint automatically before staging an amendment for review.
+
+## By hand
+
+From the folio root:
+
+\`\`\`bash
+ls INDEX.md SCHEMA.md                              # reserved files exist
+ls *.md | grep -E '[A-Z_ ]'                        # kebab-case violations (ignore reserved files)
+grep -rno '\\[\\[[^]]*\\]\\]' --include='*.md' .       # list all wikilinks…
+grep -rn '\\[\\[\\.\\.\\?/' --include='*.md' .          # …relative path markers
+\`\`\`
+
+Then check, leaf by leaf against the link list:
+
+- every \`[[target]]\` has a matching \`target.md\` (folio-root-relative)
+- every entry in \`INDEX.md\` points at an existing leaf, exactly once
+- every leaf appears in \`INDEX.md\` (or its absence is deliberate)
+- frontmatter blocks parse as YAML
+- no leaf has grown past a comfortable read (split or reorg if so)
 `,
-  "references/pr-workflow.md": `# Folio PR workflow
+  "references/pr-workflow.md": `# Folio amendment & publication workflow
 
-Folio knowledge changes stay pending until merged into \`main\`. How that merge
-happens depends on how the folio is bound — check \`folio config\` for a
-\`source\` value (local mode) vs a \`remote\` value (GitHub mode).
+Folio knowledge changes stay pending until merged into \`main\`. This ritual
+works with plain git; the CLI automates it verb-for-verb.
 
 ## Rules
 
-- Published truth is merged \`main\`.
+- Published truth is merged \`main\`. Never push to \`main\` directly.
 - Amendments are pending knowledge; surface them when relevant, but do not silently adopt them.
-- Prefer small topical amendments.
-- Never run \`gh pr ready\` — flipping a draft PR to ready is a human-only act on GitHub.
-- Use squash merges for final publication, preserving PR title/body with \`(#N)\` in the subject.
+- Prefer small topical amendments — one coherent change per branch/PR.
+- Never run \`gh pr ready\` — flipping a draft PR to ready is a human-only act.
+- Squash-merge for final publication, preserving PR title/body with \`(#N)\` in the subject.
 
-## Normal flow
-
-\`\`\`bash
-folio draft <topic>
-# edit Markdown leaves in ~/.config/folio/stores/amendments/<topic>/
-folio save -m "short message"
-folio proof     # lint + rebase; push + open/update draft PR (pr) or show diff (local)
-\`\`\`
-
-## GitHub mode (\`remote\` set)
-
-\`folio proof\` pushes the amendment branch and opens or updates a draft PR.
-A human reviews the draft PR on GitHub and marks it ready. Once ready:
+## Manual ritual (no CLI)
 
 \`\`\`bash
-folio publish
+git switch -c amend/<topic> main
+# edit leaves; keep the delta small and topical
+# hand-lint: see references/linting.md checklist
+git add -A && git commit -m "short message"
+git push -u origin amend/<topic>
+gh pr create --draft --title "..." --body "..."   # or open the PR on the web
 \`\`\`
 
-## Local mode (\`source\` set)
-
-\`folio proof\` lints, rebases onto \`main\`, and shows the diff — there is no
-remote or PR. When the amendment should become canonical:
+A human reviews and marks the PR ready on GitHub. After the squash merge:
 
 \`\`\`bash
-folio publish
+git switch main && git pull --ff-only
+git branch -d amend/<topic>
 \`\`\`
+
+No GitHub remote? Same discipline locally: branch, edit, lint, then merge to
+\`main\` only on explicit human approval.
+
+## CLI ritual
+
+Check \`folio config\` for binding: a \`remote\` value means GitHub mode, a
+\`source\` value means local mode.
+
+| step | manual | CLI |
+|---|---|---|
+| open amendment | \`git switch -c amend/<topic>\` | \`folio draft <topic>\` |
+| record edits | \`git add && git commit\` | \`folio save -m "..."\` |
+| validate + stage for review | hand-lint, rebase, push, draft PR | \`folio proof\` |
+| publish after human approval | squash merge + branch cleanup | \`folio publish\` |
+| abandon | delete branch | \`folio drop\` |
+
+In GitHub mode, \`folio proof\` pushes the amendment branch and opens or
+updates a draft PR. In local mode there is no remote or PR: \`proof\` lints,
+rebases onto \`main\`, and shows the diff; \`publish\` merges when the human
+says so.
 
 ## After merge
 
 \`\`\`bash
-folio status --update   # fast-forward local main
-folio lint --strict
+folio status --update   # or: git switch main && git pull --ff-only
+folio lint --strict     # or the manual checklist
 \`\`\`
 `,
   "references/reorg.md": `# Folio reorg guide
 
 Playbook for consolidating or restructuring leaves (merging pages, retiring
-stale ones, renaming). Distilled from the folio-leaves reorg (9 → 6 leaves).
+stale ones, renaming).
 
 ## When to reorg
 
@@ -839,17 +892,20 @@ Signals a topic's leaves have drifted:
 
 1. Map the topic: list every leaf touching it via \`INDEX.md\` and grep.
 2. Decide the target set of leaves (fewer, each with one clear job).
-3. \`folio draft <topic-reorg>\` (one amendment for the whole reorg).
+3. Open one amendment for the whole reorg: \`folio draft <topic-reorg>\`, or
+   manually \`git switch -c amend/<topic-reorg>\` (see
+   \`references/pr-workflow.md\`).
 4. Rewrite/merge/delete leaves. For each surviving leaf, sweep for stale
    framing: old repo names, "prototype", "transition", migration arrows
    (\`old → new\`), dual-home language.
 5. Update \`INDEX.md\`: remove deleted leaves, reframe descriptions of changed
    ones.
 6. Fix all inbound wikilinks to deleted/renamed leaves.
-7. \`folio save -m "..."\` then \`folio proof\` — lint must be clean (broken
-   links, stale index entries, orphans are the common reorg failures).
-8. Draft PR stays draft; a human marks it ready on GitHub. Never run
-   \`gh pr ready\`.
+7. Save and validate: \`folio save -m "..."\` then \`folio proof\`, or commit and
+   run the manual lint checklist (\`references/linting.md\`). Lint must be
+   clean — broken links, stale index entries, and orphans are the common
+   reorg failures.
+8. The draft PR stays draft; a human marks it ready. Never run \`gh pr ready\`.
 
 ## Stale-framing sweep
 
@@ -870,26 +926,33 @@ in tables and asides even after the prose is fixed.
 Folio favors flat or shallow structure. Prefer filenames, frontmatter, \`INDEX.md\`,
 and links over directories.
 
-Use deterministic namespace prefixes for collision prevention:
+Use deterministic namespace prefixes for collision prevention, e.g.:
 
-- Folio product pages: \`folio-*.md\`
-- Lituus pages: \`lituus-*.md\`
+- project pages: \`project-*.md\`
 - people pages: \`people-*.md\`
 - reusable patterns: \`patterns-*.md\`
+
+Check \`SCHEMA.md\` for the folio's own prefix vocabulary before inventing one.
 
 One level of nesting is acceptable when a catalog grows. Deeper nesting should be
 a last resort because paths cost tokens, reduce grep-ability, and add link churn.
 
 ## Leaf shape
 
-Frontmatter is optional. Use it when filtering, grouping, or tooling needs it:
+Frontmatter is optional. Use it when filtering, grouping, or tooling needs it,
+preferring the spec's shared field names:
 
 \`\`\`yaml
 ---
 title: Human Title
+description: One-sentence summary for previews and index generation.
+type: decision
 tags: [topic, kind]
+date: 2026-07-03
 ---
 \`\`\`
+
+\`type\` values are folio-local — define the vocabulary in \`SCHEMA.md\`.
 
 Then use one \`# Title\` heading and concise sections.
 
@@ -932,13 +995,16 @@ Avoid:
 We discussed several possible options and eventually landed on the idea that PRs might be useful...
 \`\`\`
 
+Concise does not mean vague. Keep names, commands, paths, dates, and tradeoffs
+when they are useful.
+
 ## Links
 
 Prefer bare bracket links:
 
 \`\`\`md
-[[folio-roadmap]]
-[[lituus-projects]]
+[[project-roadmap]]
+[[team-projects]]
 \`\`\`
 
 Use shallow folio-root-relative path links only when directories are useful:
@@ -948,6 +1014,8 @@ Use shallow folio-root-relative path links only when directories are useful:
 \`\`\`
 
 Avoid relative path markers like \`[[../foo]]\` and \`[[./foo]]\`.
+Use regular Markdown links for external URLs only — never for leaf
+relationships.
 
 ## Index
 
@@ -960,16 +1028,9 @@ It may be written by humans, LLMs, or Folio tooling.
 
 ## Amendments
 
-Prefer:
-
-\`\`\`bash
-folio draft <topic>
-# edit Markdown leaves
-folio save -m "short message"
-folio proof
-\`\`\`
-
-Never treat unmerged amendments as canonical truth.
+Never treat unmerged amendments as canonical truth. Keep each amendment small
+and topical. For the full ritual — manual or CLI — see
+\`references/pr-workflow.md\`.
 `
 };
 
