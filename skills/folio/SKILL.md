@@ -5,11 +5,11 @@ description: Use when reading, querying, writing, or maintaining Folio knowledge
 
 # Folio skill
 
-Folio is a local-first Markdown knowledgebase effectively managed with `folio` cli. 
+Folio is a local-first Markdown knowledgebase managed with the `folio` CLI.
 
-## CLI Requisite
+## CLI requisite
 
-`which folio`
+Check it is installed: `which folio`
 
 ## Installation
 
@@ -28,7 +28,8 @@ Follow the install completion for next step to complete setup.
 1. Check relevant leaves through `INDEX.md` and `SCHEMA.md`.
 2. Surface relevant open amendments/PRs as pending knowledge, but do not silently adopt them as truth.
 3. Treat merged `main` as published truth.
-4. If editing, use an amendment branch/worktree when practical and keep deltas small.
+4. If editing, use an amendment (`folio draft <topic>`) and keep deltas small.
+5. Flow: `draft` → edit → `save` → `proof` → `publish` (publish only after a human marks the PR ready).
 
 ## Conventions
 
@@ -56,3 +57,7 @@ See `references/linting.md`.
 ## PR workflow
 
 See `references/pr-workflow.md`.
+
+## Reorg / consolidation
+
+When merging, retiring, or restructuring leaves, see `references/reorg.md`.

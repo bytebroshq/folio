@@ -98,10 +98,10 @@ It may be written by humans, LLMs, or Folio tooling.
 Prefer:
 
 ```bash
-folio switch -c <topic>
+folio draft <topic>
 # edit Markdown leaves
-folio lint --strict
-folio sync -m "short message"
+folio save -m "short message"
+folio proof
 ```
 
 Never treat unmerged amendments as canonical truth.
