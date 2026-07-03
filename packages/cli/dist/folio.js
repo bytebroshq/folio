@@ -643,6 +643,14 @@ function openBrowser(url) {
 function tableRow(marker, topic, status, pr) {
   return `  ${marker}${topic.padEnd(35)} ${status.padEnd(7)} ${pr}`;
 }
+function printStatusFooter(bound, path) {
+  console.log("");
+  if (bound === path) {
+    console.log(`Bound to ${bound}`);
+    return;
+  }
+  console.log(`Bound to ${bound} · ${path}`);
+}
 function isLocalTarget(target) {
   if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target))
     return true;
@@ -1038,27 +1046,26 @@ function cmdStatus(args = []) {
     return;
   }
   const local = isLocal();
-  const full = args.includes("-f") || args.includes("--full");
-  const update = args.includes("--update");
-  console.log(`strategy: ${local ? "merge" : "pr"}`);
-  console.log(`store: ${baseRepo()}`);
+  const extended = args.includes("-x") || args.includes("--extended") || args.includes("-f") || args.includes("--full");
+  const update = args.includes("-u") || args.includes("--update");
+  const bound = source ?? remote;
   let fetchFailed = false;
   if (!local) {
-    const before = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, {
-      quiet: true
-    }).stdout;
+    const before = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
     fetchMain();
-    const after = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, {
-      quiet: true
-    }).stdout;
+    const after = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
     fetchFailed = before === "" && after === "";
   }
   const staleNote = fetchFailed ? " (couldn't reach remote — showing cached state)" : "";
   const active = getActive();
   if (!active) {
-    const dirty = run(`git -C "${baseRepo()}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${baseRepo()}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
+    const path2 = baseRepo();
+    console.log("No drafts");
+    const dirty = run(`git -C "${path2}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, {
+      quiet: true
+    }).stdout !== "" || run(`git -C "${path2}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
     if (dirty) {
-      console.log("On main — uncommitted changes (was main edited directly?)");
+      console.log("Main has unsaved changes");
     } else {
       const behind = mainExists() ? behindCount() : 0;
       if (behind > 0) {
@@ -1067,18 +1074,20 @@ function cmdStatus(args = []) {
           if (pull.exitCode !== 0) {
             throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
           }
-          console.log("Up to date (pulled).");
+          console.log("Up to date");
         } else {
-          console.log(`On main — behind by ${behind}, run 'folio status --update'${staleNote}`);
+          console.log(`Needs update, run \`folio status -u\`${staleNote}`);
         }
       } else {
         console.log(`Up to date${staleNote}`);
       }
     }
-    if (full) {
+    printStatusFooter(bound, path2);
+    if (extended) {
       const others = listAmendments();
       if (others.length > 0) {
-        console.log("Other drafts:");
+        console.log("");
+        console.log("Drafts:");
         for (const a of others) {
           console.log(`  ${a.topic} (${a.status})${a.pr ? ` — ${a.pr}` : ""}`);
         }
@@ -1088,51 +1097,42 @@ function cmdStatus(args = []) {
   }
   const path = amendmentPath(active);
   if (!worktreeExists(path)) {
-    console.log(`Draft ${active} — worktree missing, run 'folio draft ${active}' to recreate`);
+    console.log(`On draft ${active}`);
+    console.log(`Worktree missing, run \`folio draft ${active}\``);
+    printStatusFooter(bound, path);
     return;
   }
   const branch = amendmentBranch(path);
   const hasCommits = run(`git -C "${path}" rev-list --count ${mainRef()}..HEAD 2>/dev/null`, {
     quiet: true
   }).stdout !== "0";
+  console.log(`On draft ${active}`);
   if (isDirty(path)) {
-    console.log(`Draft ${active} — unsaved changes, run 'folio save'`);
-    if (full) {
-      const status = run(`git -C "${path}" status --short 2>/dev/null || true`, { quiet: true }).stdout;
-      if (status) {
-        for (const line of status.split(`
-`).slice(0, 10)) {
-          if (line)
-            console.log(`  ${line}`);
-        }
-      }
-    }
+    console.log("Pending save, run `folio save`");
   } else if (!hasCommits) {
-    console.log(`Draft ${active} — no changes yet`);
-  } else if (!local && branch && branch !== "?") {
+    console.log("No changes yet");
+  } else if (extended && !local && branch && branch !== "?") {
     const prNum = findOpenPR(remote, branch);
     if (!prNum) {
-      console.log(`Draft ${active} — saved, run 'folio proof'`);
+      console.log("Saved, run `folio proof`");
     } else {
       const isDraftPR = gh(`pr view ${prNum} --json isDraft --jq .isDraft`, remote).stdout;
       if (isDraftPR === "true") {
-        console.log(`Draft ${active} — proofed, PR #${prNum} (draft)`);
+        console.log(`Proofed, PR #${prNum} draft`);
       } else {
-        console.log(`Draft ${active} — PR #${prNum} ready, run 'folio publish'`);
+        console.log(`PR #${prNum} ready, run \`folio publish\``);
       }
     }
   } else {
-    console.log(`Draft ${active} — saved, run 'folio proof'`);
+    console.log("Saved, run `folio proof`");
   }
   if (mainExists()) {
     const behind = behindCount();
     if (behind > 0) {
-      console.log(`  main moved — proof will rebase (behind by ${behind})`);
+      console.log(`Main moved; proof will rebase (behind by ${behind})`);
     }
   }
-  if (full) {
-    console.log(`  store: ${path}`);
-  }
+  printStatusFooter(bound, path);
 }
 function cmdConfig(args) {
   ensureConfig();
@@ -1254,7 +1254,7 @@ Usage:
   folio save [-m "msg"]             Save changes in the active draft
   folio proof                      Lint + rebase; push + open draft PR (pr) or show diff (local)
   folio publish                    Merge the draft into main (pr: only once PR is ready)
-  folio status [-f] [--update]     Show current state; --update fast-forwards main
+  folio status [-u] [-x]           Show current state; -u updates, -x includes PR context
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
   folio config                     Show global config

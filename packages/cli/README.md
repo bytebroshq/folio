@@ -108,6 +108,44 @@ Check state:
 
 ```bash
 folio status
+folio status -u  # fetch and fast-forward main when an update is needed
+folio status -x  # include draft PR context when relevant
+```
+
+`status` is concise and action-oriented:
+
+```text
+No drafts
+Up to date
+
+Bound to owner/repo · ~/.config/folio/stores/.main
+```
+
+When the bound source has moved:
+
+```text
+No drafts
+Needs update, run `folio status -u`
+
+Bound to owner/repo · ~/.config/folio/stores/.main
+```
+
+While drafting:
+
+```text
+On draft my-draft
+Pending save, run `folio save`
+
+Bound to owner/repo · ~/.config/folio/stores/amendments/my-draft
+```
+
+Local mode collapses repeated paths:
+
+```text
+No drafts
+Up to date
+
+Bound to /path/to/local-folio
 ```
 
 Sync — commits, rebases, and (GitHub mode) publishes or updates the draft PR:
@@ -143,7 +181,7 @@ folio drop my-topic --force
 folio bind <owner/repo> [--web]      bind this machine to a GitHub-backed knowledge repo
 folio bind <path>                    bind in place to a local git repo
 folio create <path>                  scaffold a new folio and bind to it
-folio status                         show current state
+folio status [-u] [-x]               show current state; -u updates, -x includes PR context
 folio list                           list local amendments
 folio switch                         list local amendments
 folio switch -c <topic>              create and enter an amendment
