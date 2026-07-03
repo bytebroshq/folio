@@ -9,7 +9,10 @@ metadata:
 
 ## What folio is
 
-Folio is a Markdown knowledge format: linked **leaves**, plus `INDEX.md` (the map) and `SCHEMA.md` (the conventions), where the merged default branch is published truth. A **block** holds whatever knowledge its authors bound into it — this skill doesn't define what that is; the block does.
+Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*.
+
+- **Leaf** — one Markdown page in a folio.
+- **Block** — the collection of leaves, plus `INDEX.md` (the map) and `SCHEMA.md` (the conventions).
 
 ## Operating rules
 
