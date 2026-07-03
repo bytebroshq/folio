@@ -8,6 +8,7 @@
 import {
 	cmdBind,
 	cmdConfig,
+	cmdCreate,
 	cmdDrop,
 	cmdLint,
 	cmdList,
@@ -28,6 +29,8 @@ folio — knowledge management CLI
 
 Usage:
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
+  folio bind <path>                Bind to a local git repo, in place
+  folio create <path>              Scaffold a new folio and bind to it
   folio switch                     List amendments (* = active)
   folio switch <topic>            Switch to an existing amendment
   folio switch -c <topic>          Create a new amendment (--force to re-create)
@@ -57,6 +60,9 @@ try {
 	switch (cmd) {
 		case "bind":
 			cmdBind(args);
+			break;
+		case "create":
+			cmdCreate(args);
 			break;
 		case "switch":
 			cmdSwitch(args);

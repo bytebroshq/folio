@@ -1,15 +1,19 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
 	AMEND_DIR,
 	amendmentPath,
 	BASE_REPO,
+	baseRepo,
 	type ConfigKey,
 	clearActive,
 	ensureConfig,
 	getActive,
 	getRemote,
+	getSource,
+	isLocal,
 	readConfig,
+	resolvePath,
 	setActive,
 	topicToSlug,
 	writeConfig,
@@ -19,12 +23,13 @@ import {
 	behindCount,
 	ensureBase,
 	ensureGh,
-	fetchMain,
 	gh,
 	isDirty,
+	isMergedToMain,
 	listAmendments,
 	listOpenPRs,
 	mainExists,
+	mainRef,
 	run,
 	worktreeExists,
 } from "./git";
@@ -43,25 +48,75 @@ function tableRow(
 
 // ── bind ───────────────────────────────────────────────────────────
 
+/** A bind target is local when it points at the filesystem, not ns/repo. */
+function isLocalTarget(target: string): boolean {
+	if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target)) return true;
+	return existsSync(resolvePath(target));
+}
+
+function currentBinding(): string | null {
+	return getSource() ?? readConfig("remote");
+}
+
+/** Guard against silently discarding an existing binding's amendments. */
+function checkRebind(target: string, force: boolean): boolean {
+	const current = currentBinding();
+	if (current === target) {
+		console.log(`Already bound to ${target}.`);
+		return false;
+	}
+	if (current && !force) {
+		throw new Error(
+			`Currently bound to ${current}. All amendments will be lost. Use --force to re-bind.`,
+		);
+	}
+	return true;
+}
+
+function bindLocal(path: string, force: boolean): void {
+	const abs = resolvePath(path);
+
+	if (!checkRebind(abs, force)) return;
+
+	if (!existsSync(abs)) {
+		throw new Error(`No such directory: ${abs}. Run 'folio create ${path}'?`);
+	}
+	if (!existsSync(`${abs}/.git`)) {
+		throw new Error(
+			`${abs} is not a git repository. Run 'git init -b main' there or 'folio create <path>'.`,
+		);
+	}
+	const hasMain =
+		run(`git -C "${abs}" rev-parse --verify main 2>/dev/null`, {
+			quiet: true,
+		}).exitCode === 0;
+	if (!hasMain) {
+		throw new Error(
+			`${abs} has no 'main' branch. Folio uses main as published truth.`,
+		);
+	}
+
+	ensureConfig();
+	writeConfig("source", abs);
+	writeConfig("remote", "");
+	clearActive();
+	ensureBase();
+
+	console.log(`✓ Bound to ${abs} (local).`);
+}
+
 export function cmdBind(args: string[]): void {
 	const remote = args[0];
-	if (!remote) throw new Error("Usage: folio bind <ns/repo> [--web]");
+	if (!remote) throw new Error("Usage: folio bind <ns/repo | path> [--web]");
 
 	const hasWeb = args.includes("--web");
 
-	const currentRemote = readConfig("remote");
-	if (currentRemote === remote) {
-		console.log(`Already bound to ${remote}.`);
+	if (isLocalTarget(remote)) {
+		bindLocal(remote, args.includes("--force"));
 		return;
 	}
 
-	if (currentRemote && currentRemote !== remote) {
-		if (!args.includes("--force")) {
-			throw new Error(
-				`Currently bound to ${currentRemote}. All amendments will be lost. Use --force to re-bind.`,
-			);
-		}
-	}
+	if (!checkRebind(remote, args.includes("--force"))) return;
 
 	// Auth check before any git work
 	console.log(`Checking access to ${remote}...`);
@@ -89,6 +144,7 @@ export function cmdBind(args: string[]): void {
 	}
 
 	writeConfig("remote", remote);
+	writeConfig("source", "");
 	ensureBase(remote);
 
 	// Fast-forward main checkout
@@ -108,6 +164,57 @@ export function cmdBind(args: string[]): void {
 	if (hasWeb) {
 		cmdWeb([]);
 	}
+}
+
+// ── create ─────────────────────────────────────────────────────────
+
+const INDEX_SCAFFOLD = `# Index
+
+Map of this folio. List leaves under useful headings with bracket links to
+each leaf and a short description of what it holds.
+`;
+
+const SCHEMA_SCAFFOLD = `# SCHEMA
+
+Local conventions for this folio.
+
+## Naming
+
+- kebab-case filenames
+- namespace prefixes for grouping, e.g. project-, patterns-
+
+## Links
+
+- bracket links between leaves, resolved by filename without the .md extension
+- keep leaves listed in INDEX.md
+`;
+
+export function cmdCreate(args: string[]): void {
+	const target = args.find((a) => !a.startsWith("--"));
+	if (!target) throw new Error("Usage: folio create <path> [--force]");
+
+	const abs = resolvePath(target);
+
+	if (existsSync(abs) && readdirSync(abs).length > 0) {
+		throw new Error(`${abs} already exists and is not empty.`);
+	}
+
+	mkdirSync(abs, { recursive: true });
+	writeFileSync(`${abs}/INDEX.md`, INDEX_SCAFFOLD, "utf-8");
+	writeFileSync(`${abs}/SCHEMA.md`, SCHEMA_SCAFFOLD, "utf-8");
+
+	const init = run(
+		`git -C "${abs}" init -b main --quiet && git -C "${abs}" add -A && git -C "${abs}" commit -m "folio: scaffold INDEX and SCHEMA" --quiet`,
+	);
+	if (init.exitCode !== 0) {
+		throw new Error(`git init failed in ${abs}: ${init.stderr}`);
+	}
+
+	console.log(`✓ Created folio at ${abs}`);
+	console.log("  INDEX.md, SCHEMA.md");
+	console.log("  git init, initial commit");
+
+	bindLocal(abs, args.includes("--force"));
 }
 
 // ── switch ─────────────────────────────────────────────────────────
@@ -160,22 +267,17 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 
 	if (worktreeExists(path)) {
 		const branch = amendmentBranch(path);
-		// Check if merged to main
-		const _remote = getRemote();
-		fetchMain();
-		const merged =
-			run(
-				`git -C "${BASE_REPO}" branch -r --merged origin/main 2>/dev/null | grep -q "origin/${branch}" && echo yes || echo no`,
-				{ quiet: true },
-			).stdout === "yes";
+		const merged = isMergedToMain(branch);
 
 		if (merged) {
 			if (force) {
 				console.log(
 					`Branch '${branch}' was merged. Deleting and creating fresh...`,
 				);
-				run(`git -C "${BASE_REPO}" branch -D "${branch}" 2>/dev/null || true`);
-				run(`git push origin --delete "${branch}" 2>/dev/null || true`);
+				run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
+				if (!isLocal()) {
+					run(`git push origin --delete "${branch}" 2>/dev/null || true`);
+				}
 				run(`rm -rf "${path}"`);
 			} else {
 				throw new Error(
@@ -186,7 +288,7 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 			// Open draft — rebase and switch
 			console.log(`Rebasing ${slug} onto main...`);
 			const rebase = run(
-				`git -C "${path}" rebase origin/main --quiet 2>/dev/null`,
+				`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`,
 				{ quiet: true },
 			);
 			if (rebase.exitCode !== 0) {
@@ -194,7 +296,9 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 					`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`,
 				);
 			}
-			run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
+			if (!isLocal()) {
+				run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
+			}
 			setActive(slug);
 			console.log(`✓ Switched to amendment '${slug}'.`);
 			return;
@@ -207,17 +311,18 @@ function cmdSwitchCreate(topic: string, force: boolean): void {
 	}
 
 	// Ensure main is fresh
-	const remote = getRemote();
-	ensureBase(remote);
-	run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
-	run(
-		`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`,
-	);
+	ensureBase();
+	if (!isLocal()) {
+		run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
+		run(
+			`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`,
+		);
+	}
 
 	const branch = `amend/${slug}`;
 	console.log(`Creating amendment worktree for '${slug}'...`);
 	const wt = run(
-		`git -C "${BASE_REPO}" worktree add -b "${branch}" "${path}" origin/main --quiet 2>/dev/null`,
+		`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" ${mainRef()} --quiet 2>/dev/null`,
 	);
 	if (wt.exitCode !== 0) {
 		throw new Error(`Failed to create worktree for '${slug}'.`);
@@ -239,17 +344,8 @@ function cmdSwitchTo(topic: string): void {
 	}
 
 	const branch = amendmentBranch(path);
-	const _remote = getRemote();
-	fetchMain();
 
-	// Check if merged
-	const merged =
-		run(
-			`git -C "${BASE_REPO}" branch -r --merged origin/main 2>/dev/null | grep -q "origin/${branch}" && echo yes || echo no`,
-			{ quiet: true },
-		).stdout === "yes";
-
-	if (merged) {
+	if (isMergedToMain(branch)) {
 		throw new Error(
 			`amendment '${slug}' was merged. Use 'switch -c ${topic} --force' to restart.`,
 		);
@@ -258,7 +354,7 @@ function cmdSwitchTo(topic: string): void {
 	// Rebase
 	console.log(`Rebasing ${slug} onto main...`);
 	const rebase = run(
-		`git -C "${path}" rebase origin/main --quiet 2>/dev/null`,
+		`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`,
 		{ quiet: true },
 	);
 	if (rebase.exitCode !== 0) {
@@ -274,42 +370,50 @@ function cmdSwitchTo(topic: string): void {
 // ── sync ───────────────────────────────────────────────────────────
 
 export function cmdSync(args: string[]): void {
-	ensureGh();
 	ensureConfig();
 
-	const remote = getRemote();
-	ensureBase(remote);
+	const local = isLocal();
+	let remote = "";
+	if (!local) {
+		ensureGh();
+		remote = getRemote();
+	}
+	ensureBase(remote || undefined);
 
 	// Always surface open PRs first
-	const prs = listOpenPRs(remote);
-	if (prs.length > 0) {
-		console.log("Open PRs:");
-		for (const prLine of prs) {
-			if (prLine) console.log(`  ${prLine}`);
+	if (!local) {
+		const prs = listOpenPRs(remote);
+		if (prs.length > 0) {
+			console.log("Open PRs:");
+			for (const prLine of prs) {
+				if (prLine) console.log(`  ${prLine}`);
+			}
+			console.log("");
 		}
-		console.log("");
 	}
 
 	const active = getActive();
 
 	if (!active) {
 		// on main mode
-		console.log(`Pulling latest from ${remote}...`);
-		const pull = run(
-			`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null`,
-		);
-		if (pull.exitCode !== 0) {
-			throw new Error("Failed to pull main. Check network.");
+		if (!local) {
+			console.log(`Pulling latest from ${remote}...`);
+			const pull = run(
+				`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null`,
+			);
+			if (pull.exitCode !== 0) {
+				throw new Error("Failed to pull main. Check network.");
+			}
 		}
 
 		// Check for uncommitted changes
 		const hasChanges =
 			run(
-				`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				`git -C "${baseRepo()}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "" ||
 			run(
-				`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				`git -C "${baseRepo()}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "";
 		if (hasChanges) {
@@ -366,11 +470,20 @@ export function cmdSync(args: string[]): void {
 
 	// Rebase
 	console.log(`Rebasing '${branch}' onto main...`);
-	const rebase = run(`git -C "${path}" rebase origin/main --quiet 2>/dev/null`);
+	const rebase = run(
+		`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`,
+	);
 	if (rebase.exitCode !== 0) {
 		throw new Error(
 			`REBASE CONFLICT in ${active} — resolve in ${path}/ then re-run 'folio sync'.`,
 		);
+	}
+
+	// Local mode: no push, no PR. The branch lives in the bound repo.
+	if (local) {
+		console.log(`✓ Amendment '${active}' committed and rebased.`);
+		console.log(`  merge when ready: git -C "${baseRepo()}" merge "${branch}"`);
+		return;
 	}
 
 	if (!hasChanges) {
@@ -447,11 +560,12 @@ export function cmdDrop(args: string[]): void {
 	}
 
 	const branch = amendmentBranch(path);
-	const remote = getRemote();
+	const local = isLocal();
+	const remote = local ? "" : getRemote();
 
 	// Check for open PR
 	let prNum = "";
-	if (branch && branch !== "?") {
+	if (!local && branch && branch !== "?") {
 		const prResult = gh(
 			`pr list --head "${branch}" --state open --json number --jq '.[0].number'`,
 			remote,
@@ -494,15 +608,21 @@ export function cmdDrop(args: string[]): void {
 	}
 
 	// Delete remote branch
-	if (branch && branch !== "?") {
+	if (!local && branch && branch !== "?") {
 		run(`git push origin --delete "${branch}" 2>/dev/null || true`);
 		console.log(`  Deleted remote branch '${branch}'.`);
 	}
 
 	// Remove worktree
 	run(
-		`git -C "${BASE_REPO}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
+		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
 	);
+
+	// Local mode keeps branches in the bound repo — clean up the amend branch
+	// unless it was merged (drop --force may discard unmerged work by design).
+	if (local && branch && branch !== "?") {
+		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
+	}
 	console.log(`✓ Dropped amendment '${slug}'.`);
 
 	// Clear active if this was active
@@ -519,9 +639,16 @@ export function cmdStatus(): void {
 	ensureConfig();
 
 	const remote = readConfig("remote");
-	if (!remote) {
-		console.log("No repo bound. Run 'folio bind <ns/repo>' to get started.");
+	const source = getSource();
+	if (!remote && !source) {
+		console.log(
+			"No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.",
+		);
 		return;
+	}
+
+	if (source) {
+		console.log(`folio:        ${source} (local)`);
 	}
 
 	const active = getActive();
@@ -532,11 +659,11 @@ export function cmdStatus(): void {
 		// Check if main checkout Markdown content is dirty
 		const dirty =
 			run(
-				`git -C "${BASE_REPO}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				`git -C "${baseRepo()}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "" ||
 			run(
-				`git -C "${BASE_REPO}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
+				`git -C "${baseRepo()}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
 				{ quiet: true },
 			).stdout !== "";
 		if (dirty) {
@@ -622,13 +749,19 @@ export function cmdConfig(args: string[]): void {
 	if (!key) {
 		// Show all config
 		const remote = readConfig("remote") || "(not set)";
+		const source = readConfig("source") || "(not set)";
 		const active = readConfig("active") || "(not set)";
 		const web = readConfig("web") || "(not set)";
 		const store = readConfig("store") || "(not set)";
+		const bound = readConfig("remote") || readConfig("source");
 		console.log(`remote: ${remote}`);
+		console.log(`source: ${source}`);
 		console.log(`store: ${store}`);
 		console.log(`web: ${web}`);
 		console.log(`active: ${active}`);
+		// Resolved paths (computed, not stored)
+		console.log(`path: ${bound ? baseRepo() : "(not bound)"}`);
+		console.log(`amendments: ${AMEND_DIR}`);
 		return;
 	}
 
@@ -653,6 +786,11 @@ export function cmdWeb(args: string[]): void {
 
 	const remote = readConfig("remote");
 	if (!remote) {
+		if (isLocal()) {
+			throw new Error(
+				"Bound to a local repo — folio web needs a GitHub remote. Run 'folio bind <ns/repo>'.",
+			);
+		}
 		throw new Error("No remote configured. Run 'folio bind <ns/repo>' first.");
 	}
 
@@ -722,9 +860,9 @@ export function cmdLint(args: string[]): void {
 	if (active && existsSync(`${AMEND_DIR}/${active}`)) {
 		storeDir = `${AMEND_DIR}/${active}`;
 	} else if (mainExists()) {
-		storeDir = BASE_REPO;
+		storeDir = baseRepo();
 	} else {
-		throw new Error("No store found. Run 'folio bind <ns/repo>' first.");
+		throw new Error("No store found. Run 'folio bind <ns/repo | path>' first.");
 	}
 
 	const result = lint(storeDir, { spec });
