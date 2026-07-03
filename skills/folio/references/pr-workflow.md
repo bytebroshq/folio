@@ -1,47 +1,58 @@
-# Folio PR workflow
+# Folio amendment & publication workflow
 
-Folio knowledge changes stay pending until merged into `main`. How that merge
-happens depends on how the folio is bound — check `folio config` for a
-`source` value (local mode) vs a `remote` value (GitHub mode).
+Folio knowledge changes stay pending until merged into `main`. This ritual
+works with plain git; the CLI automates it verb-for-verb.
 
 ## Rules
 
-- Published truth is merged `main`.
+- Published truth is merged `main`. Never push to `main` directly.
 - Amendments are pending knowledge; surface them when relevant, but do not silently adopt them.
-- Prefer small topical amendments.
-- Never run `gh pr ready` — flipping a draft PR to ready is a human-only act on GitHub.
-- Use squash merges for final publication, preserving PR title/body with `(#N)` in the subject.
+- Prefer small topical amendments — one coherent change per branch/PR.
+- Never run `gh pr ready` — flipping a draft PR to ready is a human-only act.
+- Squash-merge for final publication, preserving PR title/body with `(#N)` in the subject.
 
-## Normal flow
-
-```bash
-folio draft <topic>
-# edit Markdown leaves in ~/.config/folio/stores/amendments/<topic>/
-folio save -m "short message"
-folio proof     # lint + rebase; push + open/update draft PR (pr) or show diff (local)
-```
-
-## GitHub mode (`remote` set)
-
-`folio proof` pushes the amendment branch and opens or updates a draft PR.
-A human reviews the draft PR on GitHub and marks it ready. Once ready:
+## Manual ritual (no CLI)
 
 ```bash
-folio publish
+git switch -c amend/<topic> main
+# edit leaves; keep the delta small and topical
+# hand-lint: see references/linting.md checklist
+git add -A && git commit -m "short message"
+git push -u origin amend/<topic>
+gh pr create --draft --title "..." --body "..."   # or open the PR on the web
 ```
 
-## Local mode (`source` set)
-
-`folio proof` lints, rebases onto `main`, and shows the diff — there is no
-remote or PR. When the amendment should become canonical:
+A human reviews and marks the PR ready on GitHub. After the squash merge:
 
 ```bash
-folio publish
+git switch main && git pull --ff-only
+git branch -d amend/<topic>
 ```
+
+No GitHub remote? Same discipline locally: branch, edit, lint, then merge to
+`main` only on explicit human approval.
+
+## CLI ritual
+
+Check `folio config` for binding: a `remote` value means GitHub mode, a
+`source` value means local mode.
+
+| step | manual | CLI |
+|---|---|---|
+| open amendment | `git switch -c amend/<topic>` | `folio draft <topic>` |
+| record edits | `git add && git commit` | `folio save -m "..."` |
+| validate + stage for review | hand-lint, rebase, push, draft PR | `folio proof` |
+| publish after human approval | squash merge + branch cleanup | `folio publish` |
+| abandon | delete branch | `folio drop` |
+
+In GitHub mode, `folio proof` pushes the amendment branch and opens or
+updates a draft PR. In local mode there is no remote or PR: `proof` lints,
+rebases onto `main`, and shows the diff; `publish` merges when the human
+says so.
 
 ## After merge
 
 ```bash
-folio status --update   # fast-forward local main
-folio lint --strict
+folio status --update   # or: git switch main && git pull --ff-only
+folio lint --strict     # or the manual checklist
 ```

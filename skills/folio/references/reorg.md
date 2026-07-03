@@ -1,7 +1,7 @@
 # Folio reorg guide
 
 Playbook for consolidating or restructuring leaves (merging pages, retiring
-stale ones, renaming). Distilled from the folio-leaves reorg (9 → 6 leaves).
+stale ones, renaming).
 
 ## When to reorg
 
@@ -29,17 +29,20 @@ Signals a topic's leaves have drifted:
 
 1. Map the topic: list every leaf touching it via `INDEX.md` and grep.
 2. Decide the target set of leaves (fewer, each with one clear job).
-3. `folio draft <topic-reorg>` (one amendment for the whole reorg).
+3. Open one amendment for the whole reorg: `folio draft <topic-reorg>`, or
+   manually `git switch -c amend/<topic-reorg>` (see
+   `references/pr-workflow.md`).
 4. Rewrite/merge/delete leaves. For each surviving leaf, sweep for stale
    framing: old repo names, "prototype", "transition", migration arrows
    (`old → new`), dual-home language.
 5. Update `INDEX.md`: remove deleted leaves, reframe descriptions of changed
    ones.
 6. Fix all inbound wikilinks to deleted/renamed leaves.
-7. `folio save -m "..."` then `folio proof` — lint must be clean (broken
-   links, stale index entries, orphans are the common reorg failures).
-8. Draft PR stays draft; a human marks it ready on GitHub. Never run
-   `gh pr ready`.
+7. Save and validate: `folio save -m "..."` then `folio proof`, or commit and
+   run the manual lint checklist (`references/linting.md`). Lint must be
+   clean — broken links, stale index entries, and orphans are the common
+   reorg failures.
+8. The draft PR stays draft; a human marks it ready. Never run `gh pr ready`.
 
 ## Stale-framing sweep
 
