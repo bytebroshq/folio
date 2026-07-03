@@ -629,13 +629,6 @@ function ensureGh() {
     throw new Error("gh CLI not found. Install from https://cli.github.com");
   }
 }
-function listOpenPRs(remote) {
-  const result = gh(`pr list --state open --json number,title,headRefName --jq '.[] | "#\\(.number)  \\(.title)  (\\(.headRefName))"'`, remote);
-  if (!result.stdout)
-    return [];
-  return result.stdout.split(`
-`);
-}
 
 // src/open.ts
 function openBrowser(url) {
@@ -769,43 +762,20 @@ function cmdCreate(args) {
   console.log("  git init, initial commit");
   bindLocal(abs, args.includes("--force"));
 }
-function cmdSwitch(args) {
+function cmdDraft(args) {
   ensureConfig();
   ensureBase();
-  if (args.length === 0) {
-    const active = getActive();
-    const amendments = listAmendments();
-    console.log(tableRow("", "AMENDMENT", "STATUS", "PR"));
-    if (amendments.length === 0) {
-      console.log("No amendments. Run 'folio switch -c <topic>' to start one.");
-      return;
-    }
-    for (const a of amendments) {
-      const marker = a.topic === active ? "*" : " ";
-      console.log(tableRow(marker, a.topic, a.status, a.pr || ""));
-    }
-    return;
-  }
-  let create = false;
   let force = false;
   let topic = "";
   for (const arg of args) {
-    if (arg === "-c" || arg === "--create")
-      create = true;
-    else if (arg === "--force")
+    if (arg === "--force")
       force = true;
     else
       topic = arg;
   }
-  if (create && topic) {
-    cmdSwitchCreate(topic, force);
-  } else if (topic) {
-    cmdSwitchTo(topic);
-  } else {
-    throw new Error("Usage: folio switch <topic> | folio switch -c <topic>");
+  if (!topic) {
+    throw new Error("Usage: folio draft <topic> [--force]");
   }
-}
-function cmdSwitchCreate(topic, force) {
   const slug = topicToSlug(topic);
   const path = amendmentPath(slug);
   if (worktreeExists(path)) {
@@ -813,31 +783,31 @@ function cmdSwitchCreate(topic, force) {
     const merged = isMergedToMain(branch2);
     if (merged) {
       if (force) {
-        console.log(`Branch '${branch2}' was merged. Deleting and creating fresh...`);
+        console.log(`Draft '${branch2}' was already published. Deleting and starting fresh...`);
         run(`git -C "${baseRepo()}" branch -D "${branch2}" 2>/dev/null || true`);
         if (!isLocal()) {
           run(`git push origin --delete "${branch2}" 2>/dev/null || true`);
         }
         run(`rm -rf "${path}"`);
       } else {
-        throw new Error(`amendment '${slug}' exists and was merged. Use 'switch -c ${topic} --force' to restart.`);
+        throw new Error(`draft '${slug}' was already published. Use 'draft ${topic} --force' to restart.`);
       }
     } else {
       console.log(`Rebasing ${slug} onto main...`);
       const rebase = run(`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`, { quiet: true });
       if (rebase.exitCode !== 0) {
-        throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`);
+        throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio proof'.`);
       }
       if (!isLocal()) {
         run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
       }
       setActive(slug);
-      console.log(`✓ Switched to amendment '${slug}'.`);
+      console.log(`✓ Resumed draft '${slug}'.`);
       return;
     }
   }
   if (worktreeExists(path)) {
-    throw new Error(`amendment '${slug}' already exists. Drop it first.`);
+    throw new Error(`draft '${slug}' already exists. Drop it first.`);
   }
   ensureBase();
   if (!isLocal()) {
@@ -845,140 +815,158 @@ function cmdSwitchCreate(topic, force) {
     run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`);
   }
   const branch = `amend/${slug}`;
-  console.log(`Creating amendment worktree for '${slug}'...`);
+  console.log(`Creating draft worktree for '${slug}'...`);
   const wt = run(`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" ${mainRef()} --quiet 2>/dev/null`);
   if (wt.exitCode !== 0) {
     throw new Error(`Failed to create worktree for '${slug}'.`);
   }
   setActive(slug);
-  console.log(`✓ Amendment '${slug}' created.`);
+  console.log(`✓ Draft '${slug}' created.`);
   console.log(`  store: ${path}/`);
 }
-function cmdSwitchTo(topic) {
-  const slug = topicToSlug(topic);
-  const path = amendmentPath(slug);
-  if (!worktreeExists(path)) {
-    throw new Error(`amendment '${slug}' not found. Use 'folio switch -c ${topic}' to create one.`);
-  }
-  const branch = amendmentBranch(path);
-  if (isMergedToMain(branch)) {
-    throw new Error(`amendment '${slug}' was merged. Use 'switch -c ${topic} --force' to restart.`);
-  }
-  console.log(`Rebasing ${slug} onto main...`);
-  const rebase = run(`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`, { quiet: true });
-  if (rebase.exitCode !== 0) {
-    throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio sync'.`);
-  }
-  setActive(slug);
-  console.log(`✓ Switched to amendment '${slug}'.`);
-}
-function cmdSync(args) {
-  ensureConfig();
-  const local = isLocal();
-  let remote = "";
-  if (!local) {
-    ensureGh();
-    remote = getRemote();
-  }
-  ensureBase(remote || undefined);
-  if (!local) {
-    const prs = listOpenPRs(remote);
-    if (prs.length > 0) {
-      console.log("Open PRs:");
-      for (const prLine of prs) {
-        if (prLine)
-          console.log(`  ${prLine}`);
-      }
-      console.log("");
-    }
-  }
+function requireActiveDraft(verb) {
   const active = getActive();
   if (!active) {
-    if (!local) {
-      console.log(`Pulling latest from ${remote}...`);
-      const pull = run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null`);
-      if (pull.exitCode !== 0) {
-        throw new Error("Failed to pull main. Check network.");
-      }
-    }
-    const hasChanges2 = run(`git -C "${baseRepo()}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${baseRepo()}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
-    if (hasChanges2) {
-      console.log("  (uncommitted edits in store — did you mean to amend?)");
-    }
-    console.log("✓ on main, synced.");
-    return;
+    throw new Error(`No active draft. Run 'folio draft <topic>' before '${verb}'.`);
   }
   const path = amendmentPath(active);
   if (!worktreeExists(path)) {
-    throw new Error(`Worktree for '${active}' not found. Run 'folio switch -c ${active}'.`);
+    throw new Error(`Worktree for '${active}' not found. Run 'folio draft ${active}'.`);
   }
-  const branch = amendmentBranch(path);
-  if (!branch || branch === "?") {
-    throw new Error(`Amendment '${active}' is not on a branch.`);
-  }
-  let msg = `amend: ${active}`;
-  const mIdx = args.indexOf("-m");
-  if (mIdx >= 0 && mIdx + 1 < args.length) {
-    msg = args[mIdx + 1];
-  }
-  const hasChanges = run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
+  return { active, path };
+}
+function draftHasChanges(path) {
+  return run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
     quiet: true
   }).stdout !== "" || run(`git -C "${path}" diff --cached --quiet 2>/dev/null || echo dirty`, {
     quiet: true
   }).stdout !== "" || run(`git -C "${path}" ls-files --others --exclude-standard 2>/dev/null`, {
     quiet: true
   }).stdout !== "";
-  if (hasChanges) {
-    run(`git -C "${path}" add -A`);
-    const commit = run(`git -C "${path}" commit -m "${msg.replace(/"/g, "\\\"")}" --quiet`);
-    if (commit.exitCode !== 0) {
-      throw new Error(`Commit failed: ${commit.stderr}`);
-    }
-    console.log(`Committed: ${msg}`);
+}
+function findOpenPR(remote, branch) {
+  const prNum = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`, remote).stdout;
+  return prNum && prNum !== "null" ? prNum : "";
+}
+function cmdSave(args) {
+  ensureConfig();
+  const { active, path } = requireActiveDraft("save");
+  let msg = `amend: ${active}`;
+  const mIdx = args.indexOf("-m");
+  if (mIdx >= 0 && mIdx + 1 < args.length) {
+    msg = args[mIdx + 1];
+  }
+  if (!draftHasChanges(path)) {
+    console.log(`Nothing to save in '${active}'.`);
+    return;
+  }
+  run(`git -C "${path}" add -A`);
+  const commit = run(`git -C "${path}" commit -m "${msg.replace(/"/g, "\\\"")}" --quiet`);
+  if (commit.exitCode !== 0) {
+    throw new Error(`Save failed: ${commit.stderr}`);
+  }
+  console.log(`Saved: ${msg}`);
+}
+function cmdProof(args) {
+  ensureConfig();
+  const local = isLocal();
+  const remote = local ? "" : getRemote();
+  if (!local)
+    ensureGh();
+  const { active, path } = requireActiveDraft("proof");
+  const branch = amendmentBranch(path);
+  if (!branch || branch === "?") {
+    throw new Error(`Draft '${active}' is not on a branch.`);
+  }
+  if (draftHasChanges(path)) {
+    cmdSave(args);
+  }
+  const lintResult = lint(path, { spec: "folio" });
+  printLintResult(lintResult);
+  if (hasLintErrors(lintResult)) {
+    throw new Error(`Lint found issues in '${active}'. Fix them, 'folio save', then re-run 'folio proof'.`);
   }
   console.log(`Rebasing '${branch}' onto main...`);
   const rebase = run(`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`);
   if (rebase.exitCode !== 0) {
-    throw new Error(`REBASE CONFLICT in ${active} — resolve in ${path}/ then re-run 'folio sync'.`);
+    throw new Error(`REBASE CONFLICT in ${active} — resolve in ${path}/ then re-run 'folio proof'.`);
   }
   if (local) {
-    console.log(`✓ Amendment '${active}' committed and rebased.`);
-    console.log(`  merge when ready: git -C "${baseRepo()}" merge "${branch}"`);
+    const diffStat = run(`git -C "${path}" diff ${mainRef()}...HEAD --stat 2>/dev/null`, { quiet: true }).stdout;
+    console.log(`✓ Proofed '${active}' — changes vs main:`);
+    console.log(diffStat || "  (no changes)");
+    console.log("Run 'folio publish' when ready.");
     return;
-  }
-  if (!hasChanges) {
-    const localSha = run(`git -C "${path}" rev-parse HEAD 2>/dev/null`, {
-      quiet: true
-    }).stdout;
-    const remoteSha = run(`git -C "${path}" rev-parse "origin/${branch}" 2>/dev/null || echo ""`, { quiet: true }).stdout;
-    if (localSha && remoteSha && localSha === remoteSha) {
-      console.log(`Everything up to date in '${active}'.`);
-      return;
-    }
   }
   const push = run(`git -C "${path}" push --force origin "${branch}" --quiet 2>&1`);
   if (push.exitCode !== 0) {
     throw new Error("Push failed. Check network and access.");
   }
-  const prNum = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`, remote).stdout;
-  if (!prNum || prNum === "null") {
-    const prTitle = msg.split(`
-`)[0];
-    const prResult = run(`gh pr create --repo "${remote}" --base main --head "${branch}" --draft --title "${prTitle.replace(/"/g, "\\\"")}" --body "${msg.replace(/"/g, "\\\"")}"`, { quiet: true });
+  const prNum = findOpenPR(remote, branch);
+  const msg = run(`git -C "${path}" log -1 --format=%B`, {
+    quiet: true
+  }).stdout;
+  const title = (msg.split(`
+`)[0] || `amend: ${active}`).replace(/"/g, "\\\"");
+  if (!prNum) {
+    const prResult = run(`gh pr create --repo "${remote}" --base main --head "${branch}" --draft --title "${title}" --body "${msg.replace(/"/g, "\\\"")}"`, { quiet: true });
     if (prResult.exitCode !== 0) {
       throw new Error(`PR creation failed: ${prResult.stderr}`);
     }
     const newPrNum = prResult.stdout.match(/(\d+)$/)?.[0] || "?";
-    console.log(`✓ Draft PR #${newPrNum} created`);
+    console.log(`✓ Proofed '${active}' — draft PR #${newPrNum} opened`);
     console.log(`  https://github.com/${remote}/pull/${newPrNum}`);
   } else {
-    if (hasChanges) {
-      run(`gh pr edit --repo "${remote}" ${prNum} --title "${msg.split(`
-`)[0].replace(/"/g, "\\\"")}" --body "${msg.replace(/"/g, "\\\"")}" 2>/dev/null || true`, { quiet: true });
-    }
-    console.log(`✓ Draft PR #${prNum} updated`);
+    run(`gh pr edit --repo "${remote}" ${prNum} --title "${title}" --body "${msg.replace(/"/g, "\\\"")}" 2>/dev/null || true`, { quiet: true });
+    console.log(`✓ Proofed '${active}' — draft PR #${prNum} updated`);
     console.log(`  https://github.com/${remote}/pull/${prNum}`);
   }
+  console.log("  Review on GitHub and mark it ready, then run 'folio publish'.");
+}
+function cleanupDraft(active, path, branch) {
+  run(`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`);
+  run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
+  clearActive();
+  console.log(`  Draft '${active}' closed.`);
+}
+function cmdPublish(_args) {
+  ensureConfig();
+  const local = isLocal();
+  const remote = local ? "" : getRemote();
+  if (!local)
+    ensureGh();
+  const { active, path } = requireActiveDraft("publish");
+  const branch = amendmentBranch(path);
+  if (!branch || branch === "?") {
+    throw new Error(`Draft '${active}' is not on a branch.`);
+  }
+  if (draftHasChanges(path)) {
+    throw new Error(`Draft '${active}' has unsaved changes. Run 'folio save' then 'folio proof' first.`);
+  }
+  if (local) {
+    const merge2 = run(`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`);
+    if (merge2.exitCode !== 0) {
+      throw new Error(`Merge failed: ${merge2.stderr || merge2.stdout}`);
+    }
+    console.log(`✓ Published '${active}' into main.`);
+    cleanupDraft(active, path, branch);
+    return;
+  }
+  const prNum = findOpenPR(remote, branch);
+  if (!prNum) {
+    throw new Error(`No open PR for '${active}'. Run 'folio proof' first to send it for review.`);
+  }
+  const isDraft = gh(`pr view ${prNum} --json isDraft --jq .isDraft`, remote).stdout;
+  if (isDraft === "true") {
+    console.log(`PR #${prNum} is still a draft — review it on GitHub and mark it ready, then run 'folio publish'.`);
+    return;
+  }
+  const merge = run(`gh pr merge --repo "${remote}" ${prNum} --squash --delete-branch 2>&1`);
+  if (merge.exitCode !== 0) {
+    throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
+  }
+  console.log(`✓ Published '${active}' — PR #${prNum} merged.`);
+  cleanupDraft(active, path, branch);
 }
 function cmdDrop(args) {
   let topic = "";
@@ -1041,7 +1029,7 @@ function cmdDrop(args) {
     console.log("  (active cleared — on main now)");
   }
 }
-function cmdStatus() {
+function cmdStatus(args = []) {
   ensureConfig();
   const remote = readConfig("remote");
   const source = getSource();
@@ -1049,65 +1037,101 @@ function cmdStatus() {
     console.log("No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.");
     return;
   }
-  if (source) {
-    console.log(`folio:        ${source} (local)`);
+  const local = isLocal();
+  const full = args.includes("-f") || args.includes("--full");
+  const update = args.includes("--update");
+  console.log(`strategy: ${local ? "merge" : "pr"}`);
+  console.log(`store: ${baseRepo()}`);
+  let fetchFailed = false;
+  if (!local) {
+    const before = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, {
+      quiet: true
+    }).stdout;
+    fetchMain();
+    const after = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, {
+      quiet: true
+    }).stdout;
+    fetchFailed = before === "" && after === "";
   }
+  const staleNote = fetchFailed ? " (couldn't reach remote — showing cached state)" : "";
   const active = getActive();
   if (!active) {
-    console.log("on main — no open amendments.");
     const dirty = run(`git -C "${baseRepo()}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "" || run(`git -C "${baseRepo()}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`, { quiet: true }).stdout !== "";
     if (dirty) {
-      console.log("  (uncommitted edits in store — did you mean to amend?)");
-    }
-    const remoteBound = readConfig("remote");
-    if (remoteBound && mainExists()) {
-      const behind = behindCount();
+      console.log("On main — uncommitted changes (was main edited directly?)");
+    } else {
+      const behind = mainExists() ? behindCount() : 0;
       if (behind > 0) {
-        console.log(`  behind remote by ${behind} commit(s). Run 'folio sync'.`);
+        if (update) {
+          const pull = run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>&1`);
+          if (pull.exitCode !== 0) {
+            throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
+          }
+          console.log("Up to date (pulled).");
+        } else {
+          console.log(`On main — behind by ${behind}, run 'folio status --update'${staleNote}`);
+        }
+      } else {
+        console.log(`Up to date${staleNote}`);
+      }
+    }
+    if (full) {
+      const others = listAmendments();
+      if (others.length > 0) {
+        console.log("Other drafts:");
+        for (const a of others) {
+          console.log(`  ${a.topic} (${a.status})${a.pr ? ` — ${a.pr}` : ""}`);
+        }
       }
     }
     return;
   }
-  console.log(`amendment:    ${active}`);
   const path = amendmentPath(active);
   if (!worktreeExists(path)) {
-    console.log(`  (worktree missing — run 'folio switch -c ${active}' to recreate)`);
+    console.log(`Draft ${active} — worktree missing, run 'folio draft ${active}' to recreate`);
     return;
   }
   const branch = amendmentBranch(path);
-  console.log(`branch:       ${branch}`);
+  const hasCommits = run(`git -C "${path}" rev-list --count ${mainRef()}..HEAD 2>/dev/null`, {
+    quiet: true
+  }).stdout !== "0";
   if (isDirty(path)) {
-    console.log("state:        dirty");
-    const status = run(`git -C "${path}" status --short 2>/dev/null || true`, {
-      quiet: true
-    }).stdout;
-    if (status) {
-      for (const line of status.split(`
+    console.log(`Draft ${active} — unsaved changes, run 'folio save'`);
+    if (full) {
+      const status = run(`git -C "${path}" status --short 2>/dev/null || true`, { quiet: true }).stdout;
+      if (status) {
+        for (const line of status.split(`
 `).slice(0, 10)) {
-        if (line)
-          console.log(`  ${line}`);
+          if (line)
+            console.log(`  ${line}`);
+        }
+      }
+    }
+  } else if (!hasCommits) {
+    console.log(`Draft ${active} — no changes yet`);
+  } else if (!local && branch && branch !== "?") {
+    const prNum = findOpenPR(remote, branch);
+    if (!prNum) {
+      console.log(`Draft ${active} — saved, run 'folio proof'`);
+    } else {
+      const isDraftPR = gh(`pr view ${prNum} --json isDraft --jq .isDraft`, remote).stdout;
+      if (isDraftPR === "true") {
+        console.log(`Draft ${active} — proofed, PR #${prNum} (draft)`);
+      } else {
+        console.log(`Draft ${active} — PR #${prNum} ready, run 'folio publish'`);
       }
     }
   } else {
-    console.log("state:        clean");
+    console.log(`Draft ${active} — saved, run 'folio proof'`);
   }
   if (mainExists()) {
     const behind = behindCount();
     if (behind > 0) {
-      console.log(`  behind main by ${behind} commit(s)`);
+      console.log(`  main moved — proof will rebase (behind by ${behind})`);
     }
   }
-  if (remote && branch && branch !== "?") {
-    const ghCheck = run("which gh 2>/dev/null", { quiet: true });
-    if (ghCheck.exitCode === 0) {
-      try {
-        const prResult = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`);
-        const prNum = prResult.stdout;
-        if (prNum && prNum !== "null") {
-          console.log(`pr:           https://github.com/${remote}/pull/${prNum}`);
-        }
-      } catch {}
-    }
+  if (full) {
+    console.log(`  store: ${path}`);
   }
 }
 function cmdConfig(args) {
@@ -1176,7 +1200,7 @@ function cmdList() {
   const amendments = listAmendments();
   console.log(tableRow("", "AMENDMENT", "STATUS", "PR"));
   if (amendments.length === 0) {
-    console.log("No amendments. Run 'folio switch -c <topic>' to start one.");
+    console.log("No amendments. Run 'folio draft <topic>' to start one.");
     return;
   }
   for (const a of amendments) {
@@ -1226,13 +1250,13 @@ Usage:
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
-  folio switch                     List amendments (* = active)
-  folio switch <topic>            Switch to an existing amendment
-  folio switch -c <topic>          Create a new amendment (--force to re-create)
-  folio status                     Show current state (main | amendment)
-  folio sync [-m "msg"]            Pull main → rebase → commit → push → draft PR
-  folio drop <topic> --force       Delete an amendment (local + remote)
-  folio list                       List all amendments
+  folio draft <topic>              Start or resume a draft (--force to restart)
+  folio save [-m "msg"]             Save changes in the active draft
+  folio proof                      Lint + rebase; push + open draft PR (pr) or show diff (local)
+  folio publish                    Merge the draft into main (pr: only once PR is ready)
+  folio status [-f] [--update]     Show current state; --update fast-forwards main
+  folio drop <topic> --force       Delete a draft (local + remote)
+  folio list                       List all drafts
   folio config                     Show global config
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
@@ -1243,7 +1267,7 @@ Usage:
   folio lint --strict              Exit 1 if any errors
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
-folio sync opens a draft PR; merge via folio web.
+Flow: draft → edit → save → proof → publish.
 `);
   process.exit(0);
 }
@@ -1257,11 +1281,17 @@ try {
     case "create":
       cmdCreate(args);
       break;
-    case "switch":
-      cmdSwitch(args);
+    case "draft":
+      cmdDraft(args);
       break;
-    case "sync":
-      cmdSync(args);
+    case "save":
+      cmdSave(args);
+      break;
+    case "proof":
+      cmdProof(args);
+      break;
+    case "publish":
+      cmdPublish(args);
       break;
     case "drop":
       cmdDrop(args);
@@ -1270,7 +1300,7 @@ try {
       cmdList();
       break;
     case "status":
-      cmdStatus();
+      cmdStatus(args);
       break;
     case "config":
       cmdConfig(args);
