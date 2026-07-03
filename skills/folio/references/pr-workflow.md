@@ -1,4 +1,4 @@
-# Folio review workflow
+# Folio PR workflow
 
 Folio knowledge changes stay pending until merged into `main`. How that merge
 happens depends on how the folio is bound — check `folio config` for a
@@ -9,47 +9,39 @@ happens depends on how the folio is bound — check `folio config` for a
 - Published truth is merged `main`.
 - Amendments are pending knowledge; surface them when relevant, but do not silently adopt them.
 - Prefer small topical amendments.
-- Run `folio lint --strict` before syncing.
-- In GitHub mode, use squash merges for final publication and preserve PR
-  title/body where possible, with `(#N)` in the subject.
+- Never run `gh pr ready` — flipping a draft PR to ready is a human-only act on GitHub.
+- Use squash merges for final publication, preserving PR title/body with `(#N)` in the subject.
 
 ## Normal flow
 
 ```bash
-folio switch -c <topic>
-# edit Markdown leaves
-folio lint --strict
-folio sync -m "short message"
+folio draft <topic>
+# edit Markdown leaves in ~/.config/folio/stores/amendments/<topic>/
+folio save -m "short message"
+folio proof     # lint + rebase; push + open/update draft PR (pr) or show diff (local)
 ```
 
 ## GitHub mode (`remote` set)
 
-`folio sync` pushes the amendment branch and opens or updates a draft PR.
-Review the draft PR, then mark ready and squash merge when the content
-should become canonical.
-
-After merge, pull local main and verify lint:
+`folio proof` pushes the amendment branch and opens or updates a draft PR.
+A human reviews the draft PR on GitHub and marks it ready. Once ready:
 
 ```bash
-cd ~/.config/folio/stores/.main
-git pull --ff-only
-folio lint --strict
+folio publish
 ```
 
 ## Local mode (`source` set)
 
-`folio sync` commits and rebases the amendment onto `main` in the bound
-repo, but does not push or open a PR — there is no remote. It prints the
-merge command to run when the amendment is ready:
+`folio proof` lints, rebases onto `main`, and shows the diff — there is no
+remote or PR. When the amendment should become canonical:
 
 ```bash
-git -C <bound-repo-path> merge amend/<topic>
+folio publish
 ```
 
-Merge with plain git (or open a PR by hand if the bound repo has its own
-remote/review process). After merging, drop the amendment:
+## After merge
 
 ```bash
-folio drop <topic> --force
+folio status --update   # fast-forward local main
 folio lint --strict
 ```

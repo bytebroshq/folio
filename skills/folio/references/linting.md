@@ -1,6 +1,6 @@
 # Folio linting guide
 
-Run strict lint before syncing Folio changes:
+`folio proof` runs lint automatically. To lint standalone:
 
 ```bash
 folio lint --strict
