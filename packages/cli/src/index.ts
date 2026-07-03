@@ -37,7 +37,7 @@ Usage:
   folio save [-m "msg"]             Save changes in the active draft
   folio proof                      Lint + rebase; push + open draft PR (pr) or show diff (local)
   folio publish                    Merge the draft into main (pr: only once PR is ready)
-  folio status [-f] [--update]     Show current state; --update fast-forwards main
+  folio status [-u] [-x]           Show current state; -u updates, -x includes PR context
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
   folio config                     Show global config
