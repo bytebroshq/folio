@@ -5,26 +5,33 @@
 Folio favors flat or shallow structure. Prefer filenames, frontmatter, `INDEX.md`,
 and links over directories.
 
-Use deterministic namespace prefixes for collision prevention:
+Use deterministic namespace prefixes for collision prevention, e.g.:
 
-- Folio product pages: `folio-*.md`
-- Lituus pages: `lituus-*.md`
+- project pages: `project-*.md`
 - people pages: `people-*.md`
 - reusable patterns: `patterns-*.md`
+
+Check `SCHEMA.md` for the folio's own prefix vocabulary before inventing one.
 
 One level of nesting is acceptable when a catalog grows. Deeper nesting should be
 a last resort because paths cost tokens, reduce grep-ability, and add link churn.
 
 ## Leaf shape
 
-Frontmatter is optional. Use it when filtering, grouping, or tooling needs it:
+Frontmatter is optional. Use it when filtering, grouping, or tooling needs it,
+preferring the spec's shared field names:
 
 ```yaml
 ---
 title: Human Title
+description: One-sentence summary for previews and index generation.
+type: decision
 tags: [topic, kind]
+date: 2026-07-03
 ---
 ```
+
+`type` values are folio-local — define the vocabulary in `SCHEMA.md`.
 
 Then use one `# Title` heading and concise sections.
 
@@ -67,13 +74,16 @@ Avoid:
 We discussed several possible options and eventually landed on the idea that PRs might be useful...
 ```
 
+Concise does not mean vague. Keep names, commands, paths, dates, and tradeoffs
+when they are useful.
+
 ## Links
 
 Prefer bare bracket links:
 
 ```md
-[[folio-roadmap]]
-[[lituus-projects]]
+[[project-roadmap]]
+[[team-projects]]
 ```
 
 Use shallow folio-root-relative path links only when directories are useful:
@@ -83,6 +93,8 @@ Use shallow folio-root-relative path links only when directories are useful:
 ```
 
 Avoid relative path markers like `[[../foo]]` and `[[./foo]]`.
+Use regular Markdown links for external URLs only — never for leaf
+relationships.
 
 ## Index
 
@@ -95,13 +107,6 @@ It may be written by humans, LLMs, or Folio tooling.
 
 ## Amendments
 
-Prefer:
-
-```bash
-folio draft <topic>
-# edit Markdown leaves
-folio save -m "short message"
-folio proof
-```
-
-Never treat unmerged amendments as canonical truth.
+Never treat unmerged amendments as canonical truth. Keep each amendment small
+and topical. For the full ritual — manual or CLI — see
+`references/pr-workflow.md`.
