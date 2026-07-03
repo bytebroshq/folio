@@ -25,10 +25,58 @@ var package_default = {
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname, join as join3 } from "node:path";
 
+// ../core/src/lint/checks/description-sync.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename, relative as relative2 } from "node:path";
+
+// ../core/src/lint/links.ts
+import { resolve } from "node:path";
+var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+function extractWikilinks(content) {
+  const results = [];
+  const lines = content.split(`
+`);
+  for (let i = 0;i < lines.length; i++) {
+    for (const match of lines[i].matchAll(WIKILINK_RE)) {
+      results.push({ link: match[1].trim(), line: i + 1 });
+    }
+  }
+  return results;
+}
+function cleanLinkTarget(link) {
+  return link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
+}
+function hasRelativePathMarker(link) {
+  const clean = cleanLinkTarget(link);
+  return clean === "." || clean === ".." || clean.startsWith("./") || clean.startsWith("../");
+}
+function isPathLink(link) {
+  const clean = cleanLinkTarget(link);
+  return clean.includes("/");
+}
+function targetPath(storeDir, link) {
+  const clean = cleanLinkTarget(link);
+  return resolve(storeDir, `${clean}.md`);
+}
+
 // ../core/src/lint/checks/frontmatter.ts
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 var FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+function extractFrontmatterField(content, field) {
+  const match = content.match(FRONTMATTER_RE);
+  if (!match)
+    return;
+  const fieldRe = new RegExp(`^${field}:\\s*(.*)$`, "m");
+  const fieldMatch = match[1].match(fieldRe);
+  if (!fieldMatch)
+    return;
+  let value = fieldMatch[1].trim();
+  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+    value = value.slice(1, -1);
+  }
+  return value;
+}
 function frontmatterCheck(ctx) {
   const issues = [];
   for (const file of ctx.files.allMdFiles) {
@@ -73,13 +121,55 @@ function frontmatterCheck(ctx) {
   return issues;
 }
 
+// ../core/src/lint/checks/description-sync.ts
+var INDEX_ENTRY_RE = /^-\s*\[\[([^\]|]+)(?:\|[^\]]+)?\]\]\s*(?:—\s*(.*))?$/;
+function normalizeWhitespace(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+function descriptionSyncCheck(ctx) {
+  if (ctx.spec.id !== "folio")
+    return [];
+  const issues = [];
+  const index = ctx.files.rootMdFiles.find((file) => basename(file) === "INDEX.md");
+  if (!index)
+    return issues;
+  const entryDescriptions = new Map;
+  for (const line of readFileSync2(index, "utf-8").split(`
+`)) {
+    const match = line.match(INDEX_ENTRY_RE);
+    if (!match)
+      continue;
+    const target = cleanLinkTarget(match[1].trim());
+    entryDescriptions.set(target, normalizeWhitespace(match[2] ?? ""));
+  }
+  for (const file of ctx.files.contentLeafFiles) {
+    const relNoExt = relative2(ctx.storeDir, file).replace(/\.md$/, "");
+    const entryDescription = entryDescriptions.get(relNoExt);
+    if (entryDescription === undefined)
+      continue;
+    const leafDescription = extractFrontmatterField(readFileSync2(file, "utf-8"), "description");
+    if (leafDescription === undefined)
+      continue;
+    const leafNorm = normalizeWhitespace(leafDescription);
+    if (leafNorm !== entryDescription) {
+      issues.push({
+        check: "description-sync",
+        severity: "error",
+        file: relative2(ctx.storeDir, file),
+        message: `frontmatter description "${leafNorm}" does not match INDEX.md entry description "${entryDescription}"`
+      });
+    }
+  }
+  return issues;
+}
+
 // ../core/src/lint/checks/links.ts
-import { readFileSync as readFileSync2 } from "node:fs";
-import { basename as basename2, relative as relative2 } from "node:path";
+import { readFileSync as readFileSync3 } from "node:fs";
+import { basename as basename3, relative as relative3 } from "node:path";
 
 // ../core/src/lint/files.ts
 import { readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename as basename2, join } from "node:path";
 function exists(path) {
   return !!statSync(path, { throwIfNoEntry: false });
 }
@@ -119,38 +209,8 @@ function collectFiles(storeDir, spec) {
   return {
     allMdFiles,
     rootMdFiles: rootFiles,
-    contentLeafFiles: allMdFiles.filter((file) => !structural.has(basename(file)))
+    contentLeafFiles: allMdFiles.filter((file) => !structural.has(basename2(file)))
   };
-}
-
-// ../core/src/lint/links.ts
-import { resolve } from "node:path";
-var WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
-function extractWikilinks(content) {
-  const results = [];
-  const lines = content.split(`
-`);
-  for (let i = 0;i < lines.length; i++) {
-    for (const match of lines[i].matchAll(WIKILINK_RE)) {
-      results.push({ link: match[1].trim(), line: i + 1 });
-    }
-  }
-  return results;
-}
-function cleanLinkTarget(link) {
-  return link.replace(/#.*$/, "").replace(/\.md$/, "").trim();
-}
-function hasRelativePathMarker(link) {
-  const clean = cleanLinkTarget(link);
-  return clean === "." || clean === ".." || clean.startsWith("./") || clean.startsWith("../");
-}
-function isPathLink(link) {
-  const clean = cleanLinkTarget(link);
-  return clean.includes("/");
-}
-function targetPath(storeDir, link) {
-  const clean = cleanLinkTarget(link);
-  return resolve(storeDir, `${clean}.md`);
 }
 
 // ../core/src/lint/checks/links.ts
@@ -158,8 +218,8 @@ function linkCheck(ctx) {
   const issues = [];
   let pathLinkCount = 0;
   for (const file of ctx.files.allMdFiles) {
-    const rel = relative2(ctx.storeDir, file);
-    const content = readFileSync2(file, "utf-8");
+    const rel = relative3(ctx.storeDir, file);
+    const content = readFileSync3(file, "utf-8");
     for (const { link, line } of extractWikilinks(content)) {
       if (hasRelativePathMarker(link)) {
         issues.push({
@@ -176,11 +236,11 @@ function linkCheck(ctx) {
       const target = targetPath(ctx.storeDir, link);
       if (!exists(target)) {
         issues.push({
-          check: basename2(file) === "INDEX.md" ? "stale-index" : "broken-link",
+          check: basename3(file) === "INDEX.md" ? "stale-index" : "broken-link",
           severity: "error",
           file: rel,
           line,
-          message: `[[${link}]] → ${relative2(ctx.storeDir, target)} does not exist`
+          message: `[[${link}]] → ${relative3(ctx.storeDir, target)} does not exist`
         });
       }
     }
@@ -197,11 +257,11 @@ function linkCheck(ctx) {
 }
 function duplicateIndexEntriesCheck(ctx) {
   const issues = [];
-  const index = ctx.files.rootMdFiles.find((file) => basename2(file) === "INDEX.md");
+  const index = ctx.files.rootMdFiles.find((file) => basename3(file) === "INDEX.md");
   if (!index)
     return issues;
   const seen = new Map;
-  for (const { link, line } of extractWikilinks(readFileSync2(index, "utf-8"))) {
+  for (const { link, line } of extractWikilinks(readFileSync3(index, "utf-8"))) {
     const norm = cleanLinkTarget(link);
     const lines = seen.get(norm) || [];
     lines.push(line);
@@ -221,21 +281,21 @@ function duplicateIndexEntriesCheck(ctx) {
 }
 function orphanLeavesCheck(ctx) {
   const issues = [];
-  const index = ctx.files.rootMdFiles.find((file) => basename2(file) === "INDEX.md");
+  const index = ctx.files.rootMdFiles.find((file) => basename3(file) === "INDEX.md");
   if (!index)
     return issues;
   const indexed = new Set;
-  for (const { link } of extractWikilinks(readFileSync2(index, "utf-8"))) {
+  for (const { link } of extractWikilinks(readFileSync3(index, "utf-8"))) {
     if (!hasRelativePathMarker(link))
       indexed.add(cleanLinkTarget(link));
   }
   for (const file of ctx.files.contentLeafFiles) {
-    const relNoExt = relative2(ctx.storeDir, file).replace(/\.md$/, "");
+    const relNoExt = relative3(ctx.storeDir, file).replace(/\.md$/, "");
     if (!indexed.has(relNoExt)) {
       issues.push({
         check: "orphan",
         severity: "error",
-        file: relative2(ctx.storeDir, file),
+        file: relative3(ctx.storeDir, file),
         message: "not referenced in root INDEX.md"
       });
     }
@@ -244,19 +304,19 @@ function orphanLeavesCheck(ctx) {
 }
 
 // ../core/src/lint/checks/naming.ts
-import { basename as basename3, relative as relative3 } from "node:path";
+import { basename as basename4, relative as relative4 } from "node:path";
 function namingCheck(ctx) {
   const issues = [];
   const structural = new Set(ctx.spec.structuralFiles);
   for (const file of ctx.files.contentLeafFiles) {
-    const name = basename3(file);
+    const name = basename4(file);
     if (structural.has(name))
       continue;
     if (!ctx.spec.leafFilenamePattern.test(name)) {
       issues.push({
         check: "naming",
         severity: "error",
-        file: relative3(ctx.storeDir, file),
+        file: relative4(ctx.storeDir, file),
         message: `leaf filename must be ${ctx.spec.leafFilenameDescription}`
       });
     }
@@ -266,7 +326,7 @@ function namingCheck(ctx) {
 
 // ../core/src/lint/checks/size.ts
 import { statSync as statSync2 } from "node:fs";
-import { relative as relative4 } from "node:path";
+import { relative as relative5 } from "node:path";
 function fmtBytes(n) {
   if (n < 1024)
     return `${n}B`;
@@ -283,7 +343,7 @@ function leafSizeCheck(ctx) {
       issues.push({
         check: "leaf-size",
         severity: "warn",
-        file: relative4(ctx.storeDir, file),
+        file: relative5(ctx.storeDir, file),
         message: `${fmtBytes(bytes)}  ~${tokens.toLocaleString()} tokens (warn: ${ctx.spec.leafTokenWarn.toLocaleString()})`
       });
     }
@@ -292,7 +352,7 @@ function leafSizeCheck(ctx) {
 }
 
 // ../core/src/lint/checks/structure.ts
-import { join as join2, relative as relative5 } from "node:path";
+import { join as join2, relative as relative6 } from "node:path";
 function structureCheck(ctx) {
   const issues = [];
   for (const requiredFile of ctx.spec.requiredRootFiles) {
@@ -310,7 +370,7 @@ function structureCheck(ctx) {
 function nestingCheck(ctx) {
   const issues = [];
   for (const file of ctx.files.allMdFiles) {
-    const rel = relative5(ctx.storeDir, file);
+    const rel = relative6(ctx.storeDir, file);
     const depth = rel.split("/").length - 1;
     if (depth > ctx.spec.maxPreferredNestingDepth) {
       issues.push({
@@ -366,7 +426,8 @@ var CHECK_GROUPS = [
   { label: "ORPHAN LEAVES", key: "orphan" },
   { label: "DUPLICATE INDEX ENTRIES", key: "duplicate-index" },
   { label: "LEAF SIZE", key: "leaf-size" },
-  { label: "FRONTMATTER", key: "frontmatter" }
+  { label: "FRONTMATTER", key: "frontmatter" },
+  { label: "DESCRIPTION SYNC", key: "description-sync" }
 ];
 function errorCount(result) {
   return result.issues.filter((issue) => issue.severity === "error").length;
@@ -405,7 +466,8 @@ var checks = [
   orphanLeavesCheck,
   duplicateIndexEntriesCheck,
   leafSizeCheck,
-  frontmatterCheck
+  frontmatterCheck,
+  descriptionSyncCheck
 ];
 function lint(storeDir, options = {}) {
   const spec = getLintSpec(options.spec);
@@ -422,7 +484,7 @@ function hasLintErrors(result) {
   return result.issues.some((issue) => issue.severity === "error");
 }
 // src/config.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync as readFileSync4, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as resolve2 } from "node:path";
 var FOLIO_HOME = process.env.FOLIO_HOME || `${homedir()}/.config/folio`;
@@ -433,7 +495,7 @@ var BASE_REPO = `${STORE_DIR}/.main`;
 function readConfig(key) {
   if (!existsSync(CONFIG_FILE))
     return null;
-  const raw = readFileSync3(CONFIG_FILE, "utf-8");
+  const raw = readFileSync4(CONFIG_FILE, "utf-8");
   if (!key)
     return raw;
   const match = raw.match(new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m"));
@@ -441,7 +503,7 @@ function readConfig(key) {
   return val && val !== "" ? val : null;
 }
 function writeConfig(key, value) {
-  const file = existsSync(CONFIG_FILE) ? readFileSync3(CONFIG_FILE, "utf-8") : `remote: 
+  const file = existsSync(CONFIG_FILE) ? readFileSync4(CONFIG_FILE, "utf-8") : `remote: 
 store: git
 active: 
 `;
@@ -690,7 +752,7 @@ Conventions:
 - filenames are kebab-case; namespace prefixes prevent collisions (\`project-*\`, \`people-*\`, \`patterns-*\`)
 - flat or shallow structure is preferred; organization comes from filenames, frontmatter, \`INDEX.md\`, and links — deep nesting is a last resort
 - links between leaves use bracket syntax (wikilinks): \`[[project-roadmap]]\`; shallow folio-root-relative paths (\`[[clients/acme]]\`) only when directories are in use; never \`./\` or \`../\` markers
-- frontmatter is optional; when used, prefer the spec's shared fields: \`title\`, \`description\`, \`type\`, \`tags\`, \`date\`, \`resource\`
+- frontmatter is optional; when used, prefer the spec's shared fields: \`title\`, \`description\`, \`type\`, \`tags\`, \`date\`, \`resource\` — \`description\` is the mechanical source for the leaf's \`INDEX.md\` entry text and must match it exactly
 - external URLs use regular Markdown links; leaf-to-leaf relationships never do
 
 ## Truth model
@@ -763,8 +825,11 @@ RAG, or LLM inference to decide validity.
 - bracket links resolve to existing \`.md\` files
 - no relative path markers in bracket links (\`./\`, \`../\`)
 - no stale index entries (index links to deleted/renamed leaves)
-- no orphan leaves (leaf missing from \`INDEX.md\` without deliberate reason)
+- no orphan leaves (every leaf MUST appear in \`INDEX.md\`)
 - no duplicate index entries
+- description sync: when a leaf has a \`description\` frontmatter field and an
+  index entry (\`- [[leaf]] — description\`), the entry text must exactly
+  match the leaf's description after whitespace normalization
 - frontmatter is well-formed YAML, when present
 - leaves are not oversized
 
@@ -798,7 +863,10 @@ Then check, leaf by leaf against the link list:
 
 - every \`[[target]]\` has a matching \`target.md\` (folio-root-relative)
 - every entry in \`INDEX.md\` points at an existing leaf, exactly once
-- every leaf appears in \`INDEX.md\` (or its absence is deliberate)
+- every leaf appears in \`INDEX.md\`
+- for each leaf with a \`description\` field and an index entry, the entry's
+  description text matches the frontmatter \`description\` exactly
+  (whitespace-normalized)
 - frontmatter blocks parse as YAML
 - no leaf has grown past a comfortable read (split or reorg if so)
 `,
@@ -954,6 +1022,11 @@ date: 2026-07-03
 
 \`type\` values are folio-local — define the vocabulary in \`SCHEMA.md\`.
 
+\`description\` is the source of truth for the leaf's \`INDEX.md\` entry text —
+it must match that entry exactly (whitespace-normalized). A folio SHOULD
+declare \`description\` as required in its own \`SCHEMA.md\`; the format itself
+only recommends it.
+
 Then use one \`# Title\` heading and concise sections.
 
 ## Writing style
@@ -1019,12 +1092,15 @@ relationships.
 
 ## Index
 
-Every leaf should be represented in root \`INDEX.md\` unless deliberately hidden
-from the main map. Update the relevant section when adding, deleting, or
-materially reframing a page.
+Every leaf MUST be represented in root \`INDEX.md\`. Update the relevant
+section when adding, deleting, or materially reframing a page.
 
 \`INDEX.md\` should contain useful descriptions, not just a generated file list.
 It may be written by humans, LLMs, or Folio tooling.
+
+An index entry takes the form \`- [[leaf]] — description\`. When the leaf
+carries a \`description\` frontmatter field, use that description's exact text
+after the em dash — description-sync lint checks the two match.
 
 ## Amendments
 

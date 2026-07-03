@@ -33,6 +33,11 @@ date: 2026-07-03
 
 `type` values are folio-local — define the vocabulary in `SCHEMA.md`.
 
+`description` is the source of truth for the leaf's `INDEX.md` entry text —
+it must match that entry exactly (whitespace-normalized). A folio SHOULD
+declare `description` as required in its own `SCHEMA.md`; the format itself
+only recommends it.
+
 Then use one `# Title` heading and concise sections.
 
 ## Writing style
@@ -98,12 +103,15 @@ relationships.
 
 ## Index
 
-Every leaf should be represented in root `INDEX.md` unless deliberately hidden
-from the main map. Update the relevant section when adding, deleting, or
-materially reframing a page.
+Every leaf MUST be represented in root `INDEX.md`. Update the relevant
+section when adding, deleting, or materially reframing a page.
 
 `INDEX.md` should contain useful descriptions, not just a generated file list.
 It may be written by humans, LLMs, or Folio tooling.
+
+An index entry takes the form `- [[leaf]] — description`. When the leaf
+carries a `description` frontmatter field, use that description's exact text
+after the em dash — description-sync lint checks the two match.
 
 ## Folio drafts
 

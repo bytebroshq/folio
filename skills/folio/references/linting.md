@@ -13,8 +13,11 @@ RAG, or LLM inference to decide validity.
 - bracket links resolve to existing `.md` files
 - no relative path markers in bracket links (`./`, `../`)
 - no stale index entries (index links to deleted/renamed leaves)
-- no orphan leaves (leaf missing from `INDEX.md` without deliberate reason)
+- no orphan leaves (every leaf MUST appear in `INDEX.md`)
 - no duplicate index entries
+- description sync: when a leaf has a `description` frontmatter field and an
+  index entry (`- [[leaf]] — description`), the entry text must exactly
+  match the leaf's description after whitespace normalization
 - frontmatter is well-formed YAML, when present
 - leaves are not oversized
 
@@ -48,6 +51,9 @@ Then check, leaf by leaf against the link list:
 
 - every `[[target]]` has a matching `target.md` (folio-root-relative)
 - every entry in `INDEX.md` points at an existing leaf, exactly once
-- every leaf appears in `INDEX.md` (or its absence is deliberate)
+- every leaf appears in `INDEX.md`
+- for each leaf with a `description` field and an index entry, the entry's
+  description text matches the frontmatter `description` exactly
+  (whitespace-normalized)
 - frontmatter blocks parse as YAML
 - no leaf has grown past a comfortable read (split or reorg if so)

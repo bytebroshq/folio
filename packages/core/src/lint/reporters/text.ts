@@ -11,6 +11,7 @@ const CHECK_GROUPS: { label: string; key: string }[] = [
 	{ label: "DUPLICATE INDEX ENTRIES", key: "duplicate-index" },
 	{ label: "LEAF SIZE", key: "leaf-size" },
 	{ label: "FRONTMATTER", key: "frontmatter" },
+	{ label: "DESCRIPTION SYNC", key: "description-sync" },
 ];
 
 export function errorCount(result: LintResult): number {
