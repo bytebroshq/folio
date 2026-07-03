@@ -1,7 +1,29 @@
 #!/usr/bin/env node
+// package.json
+var package_default = {
+  name: "@folio/cli",
+  version: "0.0.1",
+  private: true,
+  type: "module",
+  bin: {
+    folio: "dist/folio.js"
+  },
+  main: "src/index.ts",
+  types: "src/index.d.ts",
+  scripts: {
+    build: "bun run scripts/embed-skill.ts && bun build --target=node src/index.ts --outfile=dist/folio.js"
+  },
+  dependencies: {
+    "@folio/core": "workspace:*"
+  },
+  devDependencies: {
+    "@types/node": "^26.1.0"
+  }
+};
 
 // src/commands.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname, join as join3 } from "node:path";
 
 // ../core/src/lint/checks/frontmatter.ts
 import { readFileSync } from "node:fs";
@@ -639,6 +661,318 @@ function openBrowser(url) {
   }
 }
 
+// src/skill-bundle.gen.ts
+var skillBundle = {
+  "SKILL.md": `---
+name: folio
+description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo.
+metadata:
+  folio-cli-version: 0.0.1
+---
+
+# Folio skill
+
+Folio is a local-first Markdown knowledgebase managed with the \`folio\` CLI.
+
+## CLI requisite
+
+Check it is installed: \`which folio\`
+
+## Installation
+
+\`\`\`
+curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+\`\`\`
+
+Follow the install completion for next step to complete setup.
+
+## Getting Started
+
+\`folio --help\` - list commands and show path to store
+
+## Workflow
+
+1. Check relevant leaves through \`INDEX.md\` and \`SCHEMA.md\`.
+2. Surface relevant open amendments/PRs as pending knowledge, but do not silently adopt them as truth.
+3. Treat merged \`main\` as published truth.
+4. If editing, use an amendment (\`folio draft <topic>\`) and keep deltas small.
+5. Flow: \`draft\` → edit → \`save\` → \`proof\` → \`publish\` (publish only after a human marks the PR ready).
+
+## Conventions
+
+For the full format specification, see <https://github.com/bytebroshq/folio/blob/main/SPEC.md>.
+
+- \`INDEX.md\` maps the folio with useful descriptions
+- \`SCHEMA.md\` documents local conventions
+
+- filenames are kebab-case
+- organization comes first from filenames, frontmatter, \`INDEX.md\`, and links
+- flat or shallow structure is preferred; deeper nesting should be a last resort
+- frontmatter is optional, but useful for filtering, grouping, and tooling
+- links use bracket syntax, commonly called wikilinks: \`[[project-roadmap]]\`
+- shallow folio-root-relative path links are allowed when directories are useful: \`[[clients/acme]]\`
+- avoid \`./\` and \`../\` path markers in bracket links
+
+## Writing contract
+
+See \`references/writing.md\`.
+
+## Linting contract
+
+See \`references/linting.md\`.
+
+## PR workflow
+
+See \`references/pr-workflow.md\`.
+
+## Reorg / consolidation
+
+When merging, retiring, or restructuring leaves, see \`references/reorg.md\`.
+`,
+  "references/linting.md": `# Folio linting guide
+
+\`folio proof\` runs lint automatically. To lint standalone:
+
+\`\`\`bash
+folio lint --strict
+\`\`\`
+
+Folio lint is mechanical and deterministic. It checks structure only:
+
+- root \`INDEX.md\` exists
+- root \`SCHEMA.md\` exists
+- filenames are kebab-case
+- bracket links resolve to existing \`.md\` files
+- relative path markers in bracket links (\`./\`, \`../\`)
+- stale index entries
+- orphan leaves
+- duplicate index entries
+- frontmatter shape, when present
+- oversized leaves
+
+Flat or shallow structure is preferred, but nesting is not a format failure.
+A linter may warn about deep nesting or path-heavy catalogs as usability issues.
+
+Strict lint should fail on errors, not warnings.
+
+It must not use semantic ranking, RAG, or LLM inference to decide validity.
+
+Use \`folio lint --json\` for machine-readable output.
+Use \`folio lint --spec folio\` to select the Folio Knowledge Format explicitly.
+`,
+  "references/pr-workflow.md": `# Folio PR workflow
+
+Folio knowledge changes stay pending until merged into \`main\`. How that merge
+happens depends on how the folio is bound — check \`folio config\` for a
+\`source\` value (local mode) vs a \`remote\` value (GitHub mode).
+
+## Rules
+
+- Published truth is merged \`main\`.
+- Amendments are pending knowledge; surface them when relevant, but do not silently adopt them.
+- Prefer small topical amendments.
+- Never run \`gh pr ready\` — flipping a draft PR to ready is a human-only act on GitHub.
+- Use squash merges for final publication, preserving PR title/body with \`(#N)\` in the subject.
+
+## Normal flow
+
+\`\`\`bash
+folio draft <topic>
+# edit Markdown leaves in ~/.config/folio/stores/amendments/<topic>/
+folio save -m "short message"
+folio proof     # lint + rebase; push + open/update draft PR (pr) or show diff (local)
+\`\`\`
+
+## GitHub mode (\`remote\` set)
+
+\`folio proof\` pushes the amendment branch and opens or updates a draft PR.
+A human reviews the draft PR on GitHub and marks it ready. Once ready:
+
+\`\`\`bash
+folio publish
+\`\`\`
+
+## Local mode (\`source\` set)
+
+\`folio proof\` lints, rebases onto \`main\`, and shows the diff — there is no
+remote or PR. When the amendment should become canonical:
+
+\`\`\`bash
+folio publish
+\`\`\`
+
+## After merge
+
+\`\`\`bash
+folio status --update   # fast-forward local main
+folio lint --strict
+\`\`\`
+`,
+  "references/reorg.md": `# Folio reorg guide
+
+Playbook for consolidating or restructuring leaves (merging pages, retiring
+stale ones, renaming). Distilled from the folio-leaves reorg (9 → 6 leaves).
+
+## When to reorg
+
+Signals a topic's leaves have drifted:
+
+- multiple leaves cover overlapping ground (design notes vs shipped truth)
+- leaves frame superseded artifacts as current (old prototypes, dead repos)
+- INDEX.md descriptions no longer match what the leaves actually say
+- readers (or agents) keep pulling stale context from the wrong leaf
+
+## Principles
+
+- **One amendment.** A reorg is a single coherent change; do it as one
+  amendment / one draft PR, not a trickle of per-file edits.
+- **Current truth only.** Leaves describe what is true now. Design-session
+  history, migration narratives, and "two homes during transition" framing
+  belong in git/PR records, not in the leaf body.
+- **Merge down, don't fork.** Fold design/redesign scratch leaves into the
+  canonical leaf once shipped, then delete the scratch leaf.
+- **Retired means retired.** If an old artifact must be mentioned, name it
+  once as retired/superseded — never present it alongside the current one as
+  a parallel option.
+
+## Procedure
+
+1. Map the topic: list every leaf touching it via \`INDEX.md\` and grep.
+2. Decide the target set of leaves (fewer, each with one clear job).
+3. \`folio draft <topic-reorg>\` (one amendment for the whole reorg).
+4. Rewrite/merge/delete leaves. For each surviving leaf, sweep for stale
+   framing: old repo names, "prototype", "transition", migration arrows
+   (\`old → new\`), dual-home language.
+5. Update \`INDEX.md\`: remove deleted leaves, reframe descriptions of changed
+   ones.
+6. Fix all inbound wikilinks to deleted/renamed leaves.
+7. \`folio save -m "..."\` then \`folio proof\` — lint must be clean (broken
+   links, stale index entries, orphans are the common reorg failures).
+8. Draft PR stays draft; a human marks it ready on GitHub. Never run
+   \`gh pr ready\`.
+
+## Stale-framing sweep
+
+After the structural work, grep the touched leaves for leftovers:
+
+\`\`\`bash
+grep -rn -e 'prototype' -e 'transition' -e '→' -e '<old-repo-name>' <leaves>
+\`\`\`
+
+Every hit should either be deleted or rewritten as a one-line "retired,
+superseded by X" note. Repeat until clean — stale framing tends to survive
+in tables and asides even after the prose is fixed.
+`,
+  "references/writing.md": `# Folio writing guide
+
+## Placement
+
+Folio favors flat or shallow structure. Prefer filenames, frontmatter, \`INDEX.md\`,
+and links over directories.
+
+Use deterministic namespace prefixes for collision prevention:
+
+- Folio product pages: \`folio-*.md\`
+- Lituus pages: \`lituus-*.md\`
+- people pages: \`people-*.md\`
+- reusable patterns: \`patterns-*.md\`
+
+One level of nesting is acceptable when a catalog grows. Deeper nesting should be
+a last resort because paths cost tokens, reduce grep-ability, and add link churn.
+
+## Leaf shape
+
+Frontmatter is optional. Use it when filtering, grouping, or tooling needs it:
+
+\`\`\`yaml
+---
+title: Human Title
+tags: [topic, kind]
+---
+\`\`\`
+
+Then use one \`# Title\` heading and concise sections.
+
+## Writing style
+
+Write Folio leaves like concise technical notes.
+
+Principles:
+
+- human-readable first
+- LLM-friendly as a consequence
+- brief enough to scan
+- exact enough to act on
+- one idea per paragraph
+- bullets for sets
+- tables for comparisons
+- code blocks for exact commands, paths, or shapes
+- direct headings
+- preserve decisions, constraints, rationale, open questions, and next reads
+
+Avoid transcript summaries, throat-clearing, and narrative buildup.
+
+Prefer:
+
+\`\`\`md
+## Decision
+
+Use draft pull requests as the amendment record.
+
+## Rationale
+
+- review happens before the change is published
+- GitHub stores comments, diffs, commits, and authorship
+- merged \`main\` stays canonical
+\`\`\`
+
+Avoid:
+
+\`\`\`md
+We discussed several possible options and eventually landed on the idea that PRs might be useful...
+\`\`\`
+
+## Links
+
+Prefer bare bracket links:
+
+\`\`\`md
+[[folio-roadmap]]
+[[lituus-projects]]
+\`\`\`
+
+Use shallow folio-root-relative path links only when directories are useful:
+
+\`\`\`md
+[[clients/acme]]
+\`\`\`
+
+Avoid relative path markers like \`[[../foo]]\` and \`[[./foo]]\`.
+
+## Index
+
+Every leaf should be represented in root \`INDEX.md\` unless deliberately hidden
+from the main map. Update the relevant section when adding, deleting, or
+materially reframing a page.
+
+\`INDEX.md\` should contain useful descriptions, not just a generated file list.
+It may be written by humans, LLMs, or Folio tooling.
+
+## Amendments
+
+Prefer:
+
+\`\`\`bash
+folio draft <topic>
+# edit Markdown leaves
+folio save -m "short message"
+folio proof
+\`\`\`
+
+Never treat unmerged amendments as canonical truth.
+`
+};
+
 // src/commands.ts
 function tableRow(marker, topic, status, pr) {
   return `  ${marker}${topic.padEnd(35)} ${status.padEnd(7)} ${pr}`;
@@ -1236,6 +1570,29 @@ function cmdLint(args) {
     process.exit(1);
   }
 }
+function skillInstall(target) {
+  if (!target) {
+    throw new Error("Usage: folio skill install <path>");
+  }
+  const abs = resolvePath(target);
+  const files = Object.keys(skillBundle).sort();
+  for (const rel of files) {
+    const dest = join3(abs, rel);
+    mkdirSync2(dirname(dest), { recursive: true });
+    writeFileSync2(dest, skillBundle[rel], "utf-8");
+    console.log(`wrote ${rel}`);
+  }
+  console.log(`
+${files.length} file(s) written to ${abs}`);
+}
+function cmdSkill(args) {
+  const [sub, ...rest] = args;
+  if (sub === "install") {
+    skillInstall(rest[0]);
+    return;
+  }
+  throw new Error("Usage: folio skill install <path>");
+}
 
 // src/index.ts
 function die(msg) {
@@ -1247,6 +1604,7 @@ function help() {
 folio — knowledge management CLI
 
 Usage:
+  folio --version | -v             Print the CLI version
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
@@ -1265,6 +1623,7 @@ Usage:
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
+  folio skill install <path>       Write the embedded folio skill into <path>
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft → edit → save → proof → publish.
@@ -1273,6 +1632,10 @@ Flow: draft → edit → save → proof → publish.
 }
 var cmd = process.argv[2];
 var args = process.argv.slice(3);
+if (cmd === "--version" || cmd === "-v") {
+  console.log(`folio ${package_default.version}`);
+  process.exit(0);
+}
 try {
   switch (cmd) {
     case "bind":
@@ -1310,6 +1673,9 @@ try {
       break;
     case "lint":
       cmdLint(args);
+      break;
+    case "skill":
+      cmdSkill(args);
       break;
     case undefined:
     case "-h":

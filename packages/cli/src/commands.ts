@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
 	AMEND_DIR,
@@ -34,6 +35,7 @@ import {
 	worktreeExists,
 } from "./git";
 import { openBrowser } from "./open";
+import { skillBundle } from "./skill-bundle.gen";
 
 // ── Formatting helpers ──────────────────────────────────────────────
 
@@ -911,4 +913,39 @@ export function cmdLint(args: string[]): void {
 	if (strict && hasLintErrors(result)) {
 		process.exit(1);
 	}
+}
+
+// ── skill ──────────────────────────────────────────────────────────
+
+/**
+ * Dumb file writer: unpacks the skill bundle embedded at build time into
+ * <path>. Deliberately blind to any agent harness — it just writes files.
+ */
+function skillInstall(target: string | undefined): void {
+	if (!target) {
+		throw new Error("Usage: folio skill install <path>");
+	}
+
+	const abs = resolvePath(target);
+	const files = Object.keys(skillBundle).sort();
+
+	for (const rel of files) {
+		const dest = join(abs, rel);
+		mkdirSync(dirname(dest), { recursive: true });
+		writeFileSync(dest, skillBundle[rel] as string, "utf-8");
+		console.log(`wrote ${rel}`);
+	}
+
+	console.log(`\n${files.length} file(s) written to ${abs}`);
+}
+
+export function cmdSkill(args: string[]): void {
+	const [sub, ...rest] = args;
+
+	if (sub === "install") {
+		skillInstall(rest[0]);
+		return;
+	}
+
+	throw new Error("Usage: folio skill install <path>");
 }

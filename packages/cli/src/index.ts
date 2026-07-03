@@ -5,6 +5,7 @@
  * User-scoped. Global config in ~/.config/folio/config.yml.
  * One active amendment at a time. Amendments are git worktrees.
  */
+import pkg from "../package.json";
 import {
 	cmdBind,
 	cmdConfig,
@@ -16,6 +17,7 @@ import {
 	cmdProof,
 	cmdPublish,
 	cmdSave,
+	cmdSkill,
 	cmdStatus,
 	cmdWeb,
 } from "./commands";
@@ -30,6 +32,7 @@ function help(): never {
 folio — knowledge management CLI
 
 Usage:
+  folio --version | -v             Print the CLI version
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
@@ -48,6 +51,7 @@ Usage:
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
+  folio skill install <path>       Write the embedded folio skill into <path>
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft → edit → save → proof → publish.
@@ -57,6 +61,11 @@ Flow: draft → edit → save → proof → publish.
 
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
+
+if (cmd === "--version" || cmd === "-v") {
+	console.log(`folio ${pkg.version}`);
+	process.exit(0);
+}
 
 try {
 	switch (cmd) {
@@ -95,6 +104,9 @@ try {
 			break;
 		case "lint":
 			cmdLint(args);
+			break;
+		case "skill":
+			cmdSkill(args);
 			break;
 		case undefined:
 		case "-h":
