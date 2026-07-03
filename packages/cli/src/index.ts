@@ -9,12 +9,14 @@ import {
 	cmdBind,
 	cmdConfig,
 	cmdCreate,
+	cmdDraft,
 	cmdDrop,
 	cmdLint,
 	cmdList,
+	cmdProof,
+	cmdPublish,
+	cmdSave,
 	cmdStatus,
-	cmdSwitch,
-	cmdSync,
 	cmdWeb,
 } from "./commands";
 
@@ -31,13 +33,13 @@ Usage:
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
-  folio switch                     List amendments (* = active)
-  folio switch <topic>            Switch to an existing amendment
-  folio switch -c <topic>          Create a new amendment (--force to re-create)
-  folio status                     Show current state (main | amendment)
-  folio sync [-m "msg"]            Pull main → rebase → commit → push → draft PR
-  folio drop <topic> --force       Delete an amendment (local + remote)
-  folio list                       List all amendments
+  folio draft <topic>              Start or resume a draft (--force to restart)
+  folio save [-m "msg"]             Save changes in the active draft
+  folio proof                      Lint + rebase; push + open draft PR (pr) or show diff (local)
+  folio publish                    Merge the draft into main (pr: only once PR is ready)
+  folio status [-f] [--update]     Show current state; --update fast-forwards main
+  folio drop <topic> --force       Delete a draft (local + remote)
+  folio list                       List all drafts
   folio config                     Show global config
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
@@ -48,7 +50,7 @@ Usage:
   folio lint --strict              Exit 1 if any errors
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
-folio sync opens a draft PR; merge via folio web.
+Flow: draft → edit → save → proof → publish.
 `);
 	process.exit(0);
 }
@@ -64,11 +66,17 @@ try {
 		case "create":
 			cmdCreate(args);
 			break;
-		case "switch":
-			cmdSwitch(args);
+		case "draft":
+			cmdDraft(args);
 			break;
-		case "sync":
-			cmdSync(args);
+		case "save":
+			cmdSave(args);
+			break;
+		case "proof":
+			cmdProof(args);
+			break;
+		case "publish":
+			cmdPublish(args);
 			break;
 		case "drop":
 			cmdDrop(args);
@@ -77,7 +85,7 @@ try {
 			cmdList();
 			break;
 		case "status":
-			cmdStatus();
+			cmdStatus(args);
 			break;
 		case "config":
 			cmdConfig(args);
