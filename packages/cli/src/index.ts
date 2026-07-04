@@ -34,6 +34,7 @@ folio — knowledge management CLI
 Usage:
   folio --version | -v             Print the CLI version
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
+  folio bind <ns/repo> <path>      Bind to a knowledge repo, cloned into <path>
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
   folio draft <topic>              Start or resume a draft (--force to restart)
