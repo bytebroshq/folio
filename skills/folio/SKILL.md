@@ -11,8 +11,10 @@ metadata:
 
 Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*.
 
-- **Leaf** — one Markdown page in a folio.
-- **Block** — the collection of leaves, plus `INDEX.md` (the map) and `SCHEMA.md` (the conventions).
+- **Leaf** — a single Markdown page.
+- **Block** — a collection of leaves, including an INDEX.md map and a SCHEMA.md.
+- **Index** — the `INDEX.md` at the root of a block.
+- **Schema** — the `SCHEMA.md`; principles and conventions observed throughout a block.
 
 ## Operating rules
 
@@ -22,28 +24,28 @@ Folio is a Markdown knowledge format: linked leaves with a few strict convention
 
 ## Workflow
 
-### Orient
+### Evaluation
 
-Detect the CLI:
+Start here to establish a strategy moving forward.
 
-```
-folio --version
-```
+1. Check for CLI installation.
+   - **Installed** — compare `folio --version` to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
+   - **Not installed** — the manual workflow is the default path. The CLI is optional and unlocks the CLI workflow:
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+     ```
 
-- **Installed** — compare to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
-- **Not installed** — the manual workflow is the default path (`references/workflow-manual.md`). The CLI is optional and unlocks the CLI workflow (`references/workflow-cli.md`):
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
-  ```
+### Knowledge Search & Retrieval
 
-Then read `INDEX.md` (scope) and `SCHEMA.md` (conventions), read the leaves relevant to your task, and check for pending amendments touching your topic.
+1. Read `INDEX.md` to build a map of the block.
+2. Read `SCHEMA.md` to acquaint with its standards.
+3. Use the most efficient available tools to traverse links and read the relevant leaves.
+4. Check for pending amendments touching your topic; treat them as pending, not truth.
 
-### Make a change
+### Write
 
-Follow the path matching your setup:
-
-- **CLI installed** → `references/workflow-cli.md`
-- **Manual** → `references/workflow-manual.md`
+1.1 **CLI Driven** → `references/workflow-cli.md`
+1.2 **Manual Approach** → `references/workflow-manual.md`
 
 Both paths follow the same ritual — open an amendment on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
 
