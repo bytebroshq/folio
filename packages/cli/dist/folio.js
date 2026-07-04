@@ -523,6 +523,11 @@ function ensureConfig() {
     writeConfig("store", "git");
     writeConfig("active", "");
   }
+  const legacySource = readConfig("source");
+  if (legacySource && !readConfig("path")) {
+    writeConfig("path", legacySource);
+    writeConfig("source", "");
+  }
 }
 function getActive() {
   return readConfig("active");
@@ -545,14 +550,20 @@ function getRemote() {
     throw new Error("no remote configured — run 'folio bind <ns/repo>'");
   return remote;
 }
-function getSource() {
-  return readConfig("source");
-}
-function isLocal() {
-  return !!getSource();
+function getPath() {
+  return readConfig("path") ?? readConfig("source");
 }
 function baseRepo() {
-  return getSource() ?? BASE_REPO;
+  return getPath() ?? BASE_REPO;
+}
+function hasRemote() {
+  return !!readConfig("remote");
+}
+function getStrategy() {
+  const explicit = readConfig("strategy");
+  if (explicit === "merge" || explicit === "pr")
+    return explicit;
+  return hasRemote() ? "pr" : "merge";
 }
 function resolvePath(p) {
   const expanded = p === "~" || p.startsWith("~/") ? `${homedir()}${p.slice(1)}` : p;
@@ -589,15 +600,15 @@ function gh(args, remote) {
   return run(`gh ${args} --repo "${repo}"`, { quiet: true });
 }
 function mainRef() {
-  return isLocal() ? "main" : "origin/main";
+  return getStrategy() === "merge" ? "main" : "origin/main";
 }
 function ensureBase(remote) {
-  const source = getSource();
-  if (source) {
-    if (!existsSync2(`${source}/.git`)) {
-      throw new Error(`Bound local folio missing at ${source}. Re-run 'folio bind <path>'.`);
+  const path = getPath();
+  if (path) {
+    if (!existsSync2(`${path}/.git`)) {
+      throw new Error(`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`);
     }
-    run(`git -C "${source}" config extensions.worktreeConfig true`, {
+    run(`git -C "${path}" config extensions.worktreeConfig true`, {
       quiet: true
     });
     return;
@@ -619,20 +630,21 @@ function mainExists() {
   return existsSync2(`${baseRepo()}/.git`);
 }
 function fetchMain() {
-  if (isLocal())
+  if (!hasRemote())
     return;
   run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
 }
 function behindCount() {
-  if (isLocal())
+  if (!hasRemote())
     return 0;
   const result = run(`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`, { quiet: true });
   return Number.parseInt(result.stdout || "0", 10);
 }
 function isMergedToMain(branch) {
   fetchMain();
-  const flag = isLocal() ? "" : "-r ";
-  const needle = isLocal() ? branch : `origin/${branch}`;
+  const merge = getStrategy() === "merge";
+  const flag = merge ? "" : "-r ";
+  const needle = merge ? branch : `origin/${branch}`;
   return run(`git -C "${baseRepo()}" branch ${flag}--merged ${mainRef()} 2>/dev/null | grep -q "${needle}" && echo yes || echo no`, { quiet: true }).stdout === "yes";
 }
 function amendmentBranch(path) {
@@ -1085,7 +1097,7 @@ function isLocalTarget(target) {
   return existsSync3(resolvePath(target));
 }
 function currentBinding() {
-  return getSource() ?? readConfig("remote");
+  return getPath() ?? readConfig("remote");
 }
 function checkRebind(target, force) {
   const current = currentBinding();
@@ -1115,7 +1127,8 @@ function bindLocal(path, force) {
     throw new Error(`${abs} has no 'main' branch. Folio uses main as published truth.`);
   }
   ensureConfig();
-  writeConfig("source", abs);
+  writeConfig("path", abs);
+  writeConfig("strategy", "merge");
   writeConfig("remote", "");
   clearActive();
   ensureBase();
@@ -1148,6 +1161,8 @@ function cmdBind(args) {
     }
   }
   writeConfig("remote", remote);
+  writeConfig("strategy", "pr");
+  writeConfig("path", "");
   writeConfig("source", "");
   ensureBase(remote);
   run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || git -C "${BASE_REPO}" checkout origin/main --quiet`, { quiet: true });
@@ -1221,7 +1236,7 @@ function cmdDraft(args) {
       if (force) {
         console.log(`Draft '${branch2}' was already published. Deleting and starting fresh...`);
         run(`git -C "${baseRepo()}" branch -D "${branch2}" 2>/dev/null || true`);
-        if (!isLocal()) {
+        if (hasRemote()) {
           run(`git push origin --delete "${branch2}" 2>/dev/null || true`);
         }
         run(`rm -rf "${path}"`);
@@ -1234,7 +1249,7 @@ function cmdDraft(args) {
       if (rebase.exitCode !== 0) {
         throw new Error(`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio proof'.`);
       }
-      if (!isLocal()) {
+      if (hasRemote()) {
         run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
       }
       setActive(slug);
@@ -1246,7 +1261,7 @@ function cmdDraft(args) {
     throw new Error(`draft '${slug}' already exists. Drop it first.`);
   }
   ensureBase();
-  if (!isLocal()) {
+  if (hasRemote()) {
     run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
     run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`);
   }
@@ -1305,7 +1320,7 @@ function cmdSave(args) {
 }
 function cmdProof(args) {
   ensureConfig();
-  const local = isLocal();
+  const local = getStrategy() === "merge";
   const remote = local ? "" : getRemote();
   if (!local)
     ensureGh();
@@ -1367,7 +1382,7 @@ function cleanupDraft(active, path, branch) {
 }
 function cmdPublish(_args) {
   ensureConfig();
-  const local = isLocal();
+  const local = getStrategy() === "merge";
   const remote = local ? "" : getRemote();
   if (!local)
     ensureGh();
@@ -1421,10 +1436,11 @@ function cmdDrop(args) {
     throw new Error(`Amendment '${slug}' not found.`);
   }
   const branch = amendmentBranch(path);
-  const local = isLocal();
-  const remote = local ? "" : getRemote();
+  const remoteBound = hasRemote();
+  const merge = getStrategy() === "merge";
+  const remote = remoteBound ? getRemote() : "";
   let prNum = "";
-  if (!local && branch && branch !== "?") {
+  if (remoteBound && branch && branch !== "?") {
     const prResult = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`, remote);
     if (prResult.stdout && prResult.stdout !== "null") {
       prNum = prResult.stdout;
@@ -1450,12 +1466,12 @@ function cmdDrop(args) {
     run(`gh pr close --repo "${remote}" "${prNum}" 2>/dev/null || true`);
     console.log(`  Closed PR #${prNum}.`);
   }
-  if (!local && branch && branch !== "?") {
+  if (remoteBound && branch && branch !== "?") {
     run(`git push origin --delete "${branch}" 2>/dev/null || true`);
     console.log(`  Deleted remote branch '${branch}'.`);
   }
   run(`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`);
-  if (local && branch && branch !== "?") {
+  if (merge && branch && branch !== "?") {
     run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
   }
   console.log(`✓ Dropped amendment '${slug}'.`);
@@ -1468,17 +1484,17 @@ function cmdDrop(args) {
 function cmdStatus(args = []) {
   ensureConfig();
   const remote = readConfig("remote");
-  const source = getSource();
-  if (!remote && !source) {
+  const boundPath = getPath();
+  if (!remote && !boundPath) {
     console.log("No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.");
     return;
   }
-  const local = isLocal();
+  const local = getStrategy() === "merge";
   const extended = args.includes("-x") || args.includes("--extended") || args.includes("-f") || args.includes("--full");
   const update = args.includes("-u") || args.includes("--update");
-  const bound = source ?? remote;
+  const bound = boundPath ?? remote;
   let fetchFailed = false;
-  if (!local) {
+  if (hasRemote()) {
     const before = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
     fetchMain();
     const after = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
@@ -1568,17 +1584,19 @@ function cmdConfig(args) {
   const value = args[1];
   if (!key) {
     const remote = readConfig("remote") || "(not set)";
-    const source = readConfig("source") || "(not set)";
-    const active = readConfig("active") || "(not set)";
-    const web = readConfig("web") || "(not set)";
+    const path = getPath() || "(not set)";
+    const strategy = getStrategy();
     const store = readConfig("store") || "(not set)";
-    const bound = readConfig("remote") || readConfig("source");
+    const web = readConfig("web") || "(not set)";
+    const active = readConfig("active") || "(not set)";
+    const bound = readConfig("remote") || getPath();
     console.log(`remote: ${remote}`);
-    console.log(`source: ${source}`);
+    console.log(`path: ${path}`);
+    console.log(`strategy: ${strategy}`);
     console.log(`store: ${store}`);
     console.log(`web: ${web}`);
     console.log(`active: ${active}`);
-    console.log(`path: ${bound ? baseRepo() : "(not bound)"}`);
+    console.log(`resolved: ${bound ? baseRepo() : "(not bound)"}`);
     console.log(`amendments: ${AMEND_DIR}`);
     return;
   }
@@ -1595,7 +1613,7 @@ function cmdWeb(args) {
   const printUrl = args.includes("--print-url");
   const remote = readConfig("remote");
   if (!remote) {
-    if (isLocal()) {
+    if (getPath()) {
       throw new Error("Bound to a local repo — folio web needs a GitHub remote. Run 'folio bind <ns/repo>'.");
     }
     throw new Error("No remote configured. Run 'folio bind <ns/repo>' first.");

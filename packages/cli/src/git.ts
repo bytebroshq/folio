@@ -4,9 +4,10 @@ import {
 	AMEND_DIR,
 	BASE_REPO,
 	baseRepo,
+	getPath,
 	getRemote,
-	getSource,
-	isLocal,
+	getStrategy,
+	hasRemote,
 	readConfig,
 } from "./config";
 
@@ -55,21 +56,21 @@ export function gh(
 
 /**
  * The ref amendments branch from and rebase onto.
- * Local mode has no origin; main is the local branch itself.
+ * Merge strategy has no origin; main is the local branch itself.
  */
 export function mainRef(): string {
-	return isLocal() ? "main" : "origin/main";
+	return getStrategy() === "merge" ? "main" : "origin/main";
 }
 
 export function ensureBase(remote?: string): void {
-	const source = getSource();
-	if (source) {
-		if (!existsSync(`${source}/.git`)) {
+	const path = getPath();
+	if (path) {
+		if (!existsSync(`${path}/.git`)) {
 			throw new Error(
-				`Bound local folio missing at ${source}. Re-run 'folio bind <path>'.`,
+				`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`,
 			);
 		}
-		run(`git -C "${source}" config extensions.worktreeConfig true`, {
+		run(`git -C "${path}" config extensions.worktreeConfig true`, {
 			quiet: true,
 		});
 		return;
@@ -97,7 +98,7 @@ export function mainExists(): boolean {
 }
 
 export function fetchMain(): void {
-	if (isLocal()) return;
+	if (!hasRemote()) return;
 	run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
 }
 
@@ -108,7 +109,7 @@ export function currentBranch(): string {
 }
 
 export function behindCount(): number {
-	if (isLocal()) return 0;
+	if (!hasRemote()) return 0;
 	const result = run(
 		`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`,
 		{ quiet: true },
@@ -119,8 +120,9 @@ export function behindCount(): number {
 /** Whether an amendment branch has been merged into main. */
 export function isMergedToMain(branch: string): boolean {
 	fetchMain();
-	const flag = isLocal() ? "" : "-r ";
-	const needle = isLocal() ? branch : `origin/${branch}`;
+	const merge = getStrategy() === "merge";
+	const flag = merge ? "" : "-r ";
+	const needle = merge ? branch : `origin/${branch}`;
 	return (
 		run(
 			`git -C "${baseRepo()}" branch ${flag}--merged ${mainRef()} 2>/dev/null | grep -q "${needle}" && echo yes || echo no`,
