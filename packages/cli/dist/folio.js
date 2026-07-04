@@ -752,7 +752,10 @@ Conventions:
 - filenames are kebab-case; namespace prefixes prevent collisions (\`project-*\`, \`people-*\`, \`patterns-*\`)
 - flat or shallow structure is preferred; organization comes from filenames, frontmatter, \`INDEX.md\`, and links — deep nesting is a last resort
 - links between leaves use bracket syntax (wikilinks): \`[[project-roadmap]]\`; shallow folio-root-relative paths (\`[[clients/acme]]\`) only when directories are in use; never \`./\` or \`../\` markers
-- frontmatter is optional; when used, prefer the spec's shared fields: \`title\`, \`description\`, \`type\`, \`tags\`, \`date\`, \`resource\` — \`description\` is the mechanical source for the leaf's \`INDEX.md\` entry text and must match it exactly
+- frontmatter is optional; when used, prefer the spec's shared fields: \`title\`,
+  \`description\`, \`type\`, \`tags\`, \`date\`, \`resource\` — \`description\` is the
+  mechanical source for the leaf's \`INDEX.md\` entry text and must match it
+  exactly
 - external URLs use regular Markdown links; leaf-to-leaf relationships never do
 
 ## Truth model
