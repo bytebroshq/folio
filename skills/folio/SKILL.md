@@ -24,6 +24,8 @@ Folio is a Markdown knowledge format: linked leaves with a few strict convention
 - Use the block's enclosed SCHEMA as the guideline for writing.
 - Avoid programmatically traversing outside the block's path.
 - Don't assume topic from filenames.
+- When frontmatter `description` is present, keep it exactly in sync with the
+  leaf's `INDEX.md` entry text.
 
 ## Workflow
 

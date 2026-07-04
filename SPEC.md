@@ -121,6 +121,12 @@ Recommended fields:
 | `date` | Date of the original decision or capture, when useful. |
 | `resource` | URI identifying an external asset the leaf describes, when one exists. |
 
+Leaves SHOULD carry `description`. A conformant folio treats a leaf's
+`description` as the mechanical source for its `INDEX.md` entry text (§7);
+index-sync linting (§11) depends on it. `description` is not otherwise
+required by this specification — adoption is a folio-local convention that a
+folio SHOULD declare in its own `SCHEMA.md`.
+
 These names align with OKF frontmatter where the two formats overlap, so a
 leaf that carries them is closer to portable across profiles. See §12.
 
@@ -281,8 +287,19 @@ An index SHOULD group leaves by useful headings:
 - [[patterns-css-cascade]] — CSS cascade notes
 ```
 
-A leaf SHOULD appear in `INDEX.md` unless there is a deliberate reason to hide
-it from the main map.
+An index entry SHOULD take the RECOMMENDED form:
+
+```md
+- [[leaf]] — description text
+```
+
+A list line with a single bracket link followed by an em dash (`—`) and
+description text is an index entry. Lines that do not parse as this shape —
+prose lines, cross-reference notes without a wikilink, headings — are still
+legal in `INDEX.md`; they are simply not entries for the entry-level rules in
+§11.
+
+Every leaf MUST appear in `INDEX.md`.
 
 Index entries use the same bracket links throughout a folio.
 
@@ -361,6 +378,7 @@ A strict Folio linter SHOULD report:
 - stale index entries
 - orphan leaves
 - duplicate index entries
+- description/index description mismatches, when a leaf declares `description` (§4.1, §7)
 - malformed frontmatter, when present
 - oversized leaves
 

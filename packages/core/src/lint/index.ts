@@ -1,3 +1,4 @@
+import { descriptionSyncCheck } from "./checks/description-sync";
 import { frontmatterCheck } from "./checks/frontmatter";
 import {
 	duplicateIndexEntriesCheck,
@@ -20,6 +21,7 @@ const checks: LintCheck[] = [
 	duplicateIndexEntriesCheck,
 	leafSizeCheck,
 	frontmatterCheck,
+	descriptionSyncCheck,
 ];
 
 export function lint(storeDir: string, options: LintOptions = {}): LintResult {
