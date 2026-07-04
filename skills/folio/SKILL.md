@@ -7,78 +7,55 @@ metadata:
 
 # Folio skill
 
-Folio is a **Markdown knowledge format**: linked Markdown with a few strict
-conventions. A folio is readable and writable with nothing but a text editor
-and git — the `folio` CLI is an optional accelerator, not a requirement.
+## What folio is
 
-Full specification: <https://github.com/bytebroshq/folio/blob/main/SPEC.md>.
+Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*.
 
-## The format
+- **Leaf** — a single Markdown page.
+- **Block** — a collection of leaves, including an INDEX.md map and a SCHEMA.md.
+- **Index** — the `INDEX.md` at the root of a block.
+- **Schema** — the `SCHEMA.md`; principles and conventions observed throughout a block.
 
-A folio is a directory of Markdown **leaves** plus two required root files:
+## Directives
 
-- `INDEX.md` — the folio map, with useful descriptions (not a bare file list)
-- `SCHEMA.md` — local conventions: naming, tags, placement, anti-patterns
-
-Conventions:
-
-- filenames are kebab-case; namespace prefixes prevent collisions (`project-*`, `people-*`, `patterns-*`)
-- flat or shallow structure is preferred; organization comes from filenames, frontmatter, `INDEX.md`, and links — deep nesting is a last resort
-- links between leaves use bracket syntax (wikilinks): `[[project-roadmap]]`; shallow folio-root-relative paths (`[[clients/acme]]`) only when directories are in use; never `./` or `../` markers
-- frontmatter is optional; when used, prefer the spec's shared fields: `title`, `description`, `type`, `tags`, `date`, `resource`
-- external URLs use regular Markdown links; leaf-to-leaf relationships never do
-
-## Truth model
-
-- Merged `main` is published truth.
-- Amendments (branches / draft PRs) are **pending** knowledge: surface them
-  when relevant, never silently adopt them as truth.
-- Keep deltas small and topical — one amendment per coherent change.
+- Folio knowledge is ground truth unless the user disagrees.
+- Leaves MUST be FKF spec compliant; use `folio lint` when available.
+- Always keep knowledge current; check with `folio status` regularly.
+- Use the block's enclosed SCHEMA as the guideline for writing.
+- Avoid programmatically traversing outside the block's path.
+- Don't assume topic from filenames.
 
 ## Workflow
 
-1. Get oriented: read `INDEX.md` and `SCHEMA.md`, then the relevant leaves.
-2. Check for open amendments/PRs touching your topic; treat them as pending.
-3. To edit, make an amendment and follow one of the paths below.
+### Evaluation
 
-## Editing: two paths
+Start here to establish a strategy moving forward.
 
-**With the CLI** (check `which folio`) — the ritual, automated:
+1. Check for CLI installation.
+   - **Installed** — compare `folio --version` to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
+   - **Not installed** — the manual workflow is the default path. The CLI is optional and unlocks the CLI workflow:
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+     ```
 
-```bash
-folio draft <topic>   # amendment branch + draft worktree
-# edit leaves in the draft store
-folio save -m "short message"
-folio proof           # lint + rebase; push + draft PR (GitHub mode) or diff (local)
-folio publish         # only after a human marks the PR ready
-```
+### Knowledge Search & Retrieval
 
-**Without the CLI** — the same ritual by hand: branch, edit, lint manually,
-draft PR, human-approved squash merge. Full recipe in
-`references/pr-workflow.md`; manual lint checklist in `references/linting.md`.
+1. Read `INDEX.md` to build a map of the block.
+2. Read `SCHEMA.md` to acquaint with its standards.
+3. Use the most efficient available tools to traverse links and read the relevant leaves.
+4. Check for pending folio drafts touching your topic; treat them as pending, not truth.
 
-Either way: never run `gh pr ready` — flipping a draft PR to ready is a
-human-only act.
+### Write
 
-## CLI freshness check
+1.1 **CLI Driven** → `references/workflow-cli.md`
+1.2 **Manual Approach** → `references/workflow-manual.md`
 
-This skill was written against folio CLI **0.0.1** (frontmatter stamp).
-Before relying on CLI specifics, compare with `folio --version`. If the
-versions differ — or the flag is unknown (older CLI) — verify verbs against
-`folio --help` instead of trusting this file, and if the installed CLI
-offers `folio skill install`, point it at this skill's directory to refresh
-these files from the CLI's embedded copy, then re-read them before
-continuing.
-
-To install the CLI:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
-```
+Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
 
 ## References
 
-- `references/writing.md` — writing contract: placement, leaf shape, style, index discipline
-- `references/linting.md` — conformance rules and how to check them, with or without the CLI
-- `references/pr-workflow.md` — amendment/publication ritual, manual and CLI forms
+- `references/workflow-cli.md` — draft ritual via the CLI
+- `references/workflow-manual.md` — draft ritual via plain git
+- `references/writing.md` — writing contract: placement, leaf shape, index discipline
+- `references/linting.md` — conformance rules and how to check them
 - `references/reorg.md` — consolidating, merging, or retiring leaves

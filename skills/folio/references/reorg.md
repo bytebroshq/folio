@@ -14,8 +14,8 @@ Signals a topic's leaves have drifted:
 
 ## Principles
 
-- **One amendment.** A reorg is a single coherent change; do it as one
-  amendment / one draft PR, not a trickle of per-file edits.
+- **One draft.** A reorg is a single coherent change; do it as one
+  folio draft / one draft PR, not a trickle of per-file edits.
 - **Current truth only.** Leaves describe what is true now. Design-session
   history, migration narratives, and "two homes during transition" framing
   belong in git/PR records, not in the leaf body.
@@ -29,9 +29,9 @@ Signals a topic's leaves have drifted:
 
 1. Map the topic: list every leaf touching it via `INDEX.md` and grep.
 2. Decide the target set of leaves (fewer, each with one clear job).
-3. Open one amendment for the whole reorg: `folio draft <topic-reorg>`, or
+3. Open one folio draft for the whole reorg: `folio draft <topic-reorg>`, or
    manually `git switch -c amend/<topic-reorg>` (see
-   `references/pr-workflow.md`).
+   `references/workflow-manual.md`).
 4. Rewrite/merge/delete leaves. For each surviving leaf, sweep for stale
    framing: old repo names, "prototype", "transition", migration arrows
    (`old → new`), dual-home language.

@@ -31,7 +31,7 @@ folio lint --spec folio    # select the Folio Knowledge Format profile explicitl
 folio lint --spec okf      # lint an OKF bundle by its own rules instead
 ```
 
-`folio proof` runs lint automatically before staging an amendment for review.
+`folio proof` runs lint automatically before staging a folio draft for review.
 
 ## By hand
 
