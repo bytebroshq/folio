@@ -16,11 +16,14 @@ Folio is a Markdown knowledge format: linked leaves with a few strict convention
 - **Index** — the `INDEX.md` at the root of a block.
 - **Schema** — the `SCHEMA.md`; principles and conventions observed throughout a block.
 
-## Operating rules
+## Directives
 
-- **The CLI is ground truth for its own state.** Run `folio status` for state and the next action; run `folio --help` for verbs. Its output is authoritative, not a claim to verify with git.
-- **A block is ground truth for its own content.** Read `INDEX.md` and the relevant leaves; don't assume a block's scope from its name, repo, or this skill.
-- **The merged default branch is published truth.** Draft PRs and unmerged branches are pending knowledge; surface them as pending, don't adopt as truth.
+- Folio knowledge is ground truth unless the user disagrees.
+- Leaves MUST be FKF spec compliant; use `folio lint` when available.
+- Always keep knowledge current; check with `folio status` regularly.
+- Use the block's enclosed SCHEMA as the guideline for writing.
+- Avoid programmatically traversing outside the block's path.
+- Don't assume topic from filenames.
 
 ## Workflow
 
@@ -48,10 +51,6 @@ Start here to establish a strategy moving forward.
 1.2 **Manual Approach** → `references/workflow-manual.md`
 
 Both paths follow the same ritual — open an amendment on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
-
-## Conventions
-
-Leaf conventions — naming, links, frontmatter, style — live in the block's `SCHEMA.md`. Read it and follow it.
 
 ## References
 
