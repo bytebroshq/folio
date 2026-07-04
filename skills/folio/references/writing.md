@@ -59,7 +59,7 @@ Prefer:
 ```md
 ## Decision
 
-Use draft pull requests as the amendment record.
+Use draft pull requests as the folio draft record.
 
 ## Rationale
 
@@ -105,8 +105,8 @@ materially reframing a page.
 `INDEX.md` should contain useful descriptions, not just a generated file list.
 It may be written by humans, LLMs, or Folio tooling.
 
-## Amendments
+## Folio drafts
 
-Never treat unmerged amendments as canonical truth. Keep each amendment small
+Never treat unmerged folio drafts as canonical truth. Keep each draft small
 and topical. For the full ritual — manual or CLI — see
-`references/pr-workflow.md`.
+`references/workflow-cli.md` and `references/workflow-manual.md`.

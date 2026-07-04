@@ -43,19 +43,19 @@ Start here to establish a strategy moving forward.
 1. Read `INDEX.md` to build a map of the block.
 2. Read `SCHEMA.md` to acquaint with its standards.
 3. Use the most efficient available tools to traverse links and read the relevant leaves.
-4. Check for pending amendments touching your topic; treat them as pending, not truth.
+4. Check for pending folio drafts touching your topic; treat them as pending, not truth.
 
 ### Write
 
 1.1 **CLI Driven** → `references/workflow-cli.md`
 1.2 **Manual Approach** → `references/workflow-manual.md`
 
-Both paths follow the same ritual — open an amendment on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
+Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
 
 ## References
 
-- `references/workflow-cli.md` — amendment ritual via the CLI
-- `references/workflow-manual.md` — amendment ritual via plain git
+- `references/workflow-cli.md` — draft ritual via the CLI
+- `references/workflow-manual.md` — draft ritual via plain git
 - `references/writing.md` — writing contract: placement, leaf shape, index discipline
 - `references/linting.md` — conformance rules and how to check them
 - `references/reorg.md` — consolidating, merging, or retiring leaves

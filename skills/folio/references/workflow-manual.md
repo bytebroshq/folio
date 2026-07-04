@@ -1,4 +1,4 @@
-# Folio amendment workflow — manual
+# Folio draft workflow — manual
 
 When the `folio` CLI is not installed, the ritual uses plain git and the GitHub CLI (or the web). The CLI ritual (`workflow-cli.md`) follows the same shape verb-for-verb if the CLI is available later.
 
@@ -25,8 +25,8 @@ No GitHub remote? Same discipline locally: branch, edit, lint, then merge into t
 ## Rules
 
 - The merged default branch is published truth. Never push to it directly.
-- Amendments are pending knowledge; surface them as pending, don't adopt them silently as truth.
-- One coherent change per amendment; keep deltas small and topical.
+- Folio drafts are pending knowledge; surface them as pending, don't adopt them silently as truth.
+- One coherent change per draft; keep deltas small and topical.
 - **Flipping a draft PR to ready is a human act.** Never run `gh pr ready`; let the human do it on GitHub.
 - Squash-merge on publish, preserving the PR title/body with `(#N)` in the subject.
 
