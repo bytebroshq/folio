@@ -2,7 +2,7 @@
 // package.json
 var package_default = {
   name: "@folio/cli",
-  version: "0.0.1",
+  version: "0.1.0",
   private: true,
   type: "module",
   bin: {
@@ -606,7 +606,15 @@ function ensureBase(remote) {
   const path = getPath();
   if (path) {
     if (!existsSync2(`${path}/.git`)) {
-      throw new Error(`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`);
+      const repo2 = remote ?? readConfig("remote");
+      if (!repo2) {
+        throw new Error(`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`);
+      }
+      console.log(`Recreating checkout of ${repo2} at ${path}...`);
+      const r2 = run(`git clone --quiet git@github.com:${repo2}.git "${path}"`);
+      if (r2.exitCode !== 0) {
+        throw new Error(`Failed to clone ${repo2} into ${path}. Check access and try again.`);
+      }
     }
     run(`git -C "${path}" config extensions.worktreeConfig true`, {
       quiet: true
@@ -632,13 +640,20 @@ function mainExists() {
 function fetchMain() {
   if (!hasRemote())
     return;
-  run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
+  run(`git -C "${baseRepo()}" fetch origin main --quiet`, { quiet: true });
 }
 function behindCount() {
   if (!hasRemote())
     return 0;
-  const result = run(`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`, { quiet: true });
+  const result = run(`git -C "${baseRepo()}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`, { quiet: true });
   return Number.parseInt(result.stdout || "0", 10);
+}
+function parseGitHubOrigin(repoPath) {
+  const url = run(`git -C "${repoPath}" remote get-url origin 2>/dev/null`, {
+    quiet: true
+  }).stdout;
+  const match = url.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
+  return match ? match[1] : null;
 }
 function isMergedToMain(branch) {
   fetchMain();
@@ -741,7 +756,7 @@ var skillBundle = {
 name: folio
 description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. Works with or without the folio CLI.
 metadata:
-  folio-cli-version: 0.0.1
+  folio-cli-version: 0.1.0
 ---
 
 # Folio skill
@@ -919,7 +934,7 @@ Every hit should either be deleted or rewritten as a one-line "retired,
 superseded by X" note. Repeat until clean — stale framing tends to survive
 in tables and asides even after the prose is fixed.
 `,
-  "references/workflow-cli.md": '# Folio draft workflow — CLI\n\nWhen the `folio` CLI is installed, the ritual is:\n\n```bash\nfolio draft <topic>     # opens a draft worktree on the amend/<topic> branch\n# edit leaves in the worktree; keep the delta small and topical\nfolio save -m "..."     # commits the change\nfolio proof             # lints, rebases onto the default branch, pushes, opens/updates a draft PR\n# a human reviews and marks the PR ready on GitHub\nfolio publish           # squash-merges after human approval; cleans up the branch\n```\n\n## Strategy\n\n`folio config` reports the binding: a `remote` value (e.g. `owner/repo`) means GitHub mode; a `source` value means local mode.\n\n- **GitHub mode** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.\n- **Local mode** — no remote or PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` merges when the human says so.\n\n## Rules\n\n- The merged default branch is published truth. Never push to it directly.\n- Folio drafts are pending knowledge; surface them as pending, don\'t adopt them silently as truth.\n- One coherent change per draft; keep deltas small and topical.\n- **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.\n- Squash-merge on publish, preserving the PR title/body with `(#N)` in the subject.\n\n## Abandon\n\n```bash\nfolio drop              # deletes the amend/ branch and worktree\n```\n\n## After merge\n\n```bash\nfolio status            # confirms the default branch is current\n```\n',
+  "references/workflow-cli.md": '# Folio draft workflow — CLI\n\nWhen the `folio` CLI is installed, the ritual is:\n\n```bash\nfolio draft <topic>     # opens a draft worktree on the amend/<topic> branch\n# edit leaves in the worktree; keep the delta small and topical\nfolio save -m "..."     # commits the change\nfolio proof             # lints, rebases onto the default branch, pushes, opens/updates a draft PR\n# a human reviews and marks the PR ready on GitHub\nfolio publish           # squash-merges after human approval; cleans up the branch\n```\n\n## Strategy\n\n`folio config` reports the binding as three keys: `remote` (owner/repo, if GitHub-backed), `path` (where the checkout lives), and `strategy` — which names what `publish` does.\n\n- **`strategy: pr`** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.\n- **`strategy: merge`** — no PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` merges when the human says so.\n\n## Rules\n\n- The merged default branch is published truth. Never push to it directly.\n- Folio drafts are pending knowledge; surface them as pending, don\'t adopt them silently as truth.\n- One coherent change per draft; keep deltas small and topical.\n- **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.\n- Squash-merge on publish, preserving the PR title/body with `(#N)` in the subject.\n\n## Abandon\n\n```bash\nfolio drop              # deletes the amend/ branch and worktree\n```\n\n## After merge\n\n```bash\nfolio status            # confirms the default branch is current\n```\n',
   "references/workflow-manual.md": `# Folio draft workflow — manual
 
 When the \`folio\` CLI is not installed, the ritual uses plain git and the GitHub CLI (or the web). The CLI ritual (\`workflow-cli.md\`) follows the same shape verb-for-verb if the CLI is available later.
@@ -1091,28 +1106,48 @@ function printStatusFooter(bound, path) {
   }
   console.log(`Bound to ${bound} · ${path}`);
 }
-function isLocalTarget(target) {
+var REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
+function resolveBindTarget(target) {
   if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target))
-    return true;
-  return existsSync3(resolvePath(target));
+    return "local";
+  return existsSync3(resolvePath(target)) ? "local" : "remote";
 }
 function currentBinding() {
-  return getPath() ?? readConfig("remote");
+  return { remote: readConfig("remote"), path: getPath() };
 }
-function checkRebind(target, force) {
+function describeBinding(b) {
+  if (b.remote && b.path)
+    return `${b.remote} · ${b.path}`;
+  return b.remote ?? b.path ?? "(none)";
+}
+function checkRebind(next, force) {
   const current = currentBinding();
-  if (current === target) {
-    console.log(`Already bound to ${target}.`);
+  if (!current.remote && !current.path)
+    return true;
+  if (current.remote === next.remote && current.path === next.path) {
+    console.log(`Already bound to ${describeBinding(current)}.`);
     return false;
   }
-  if (current && !force) {
-    throw new Error(`Currently bound to ${current}. All amendments will be lost. Use --force to re-bind.`);
+  if (!force) {
+    throw new Error(`Currently bound to ${describeBinding(current)}. All amendments will be lost. Use --force to re-bind.`);
   }
   return true;
 }
+function detachCurrent() {
+  const old = baseRepo();
+  if (existsSync3(AMEND_DIR)) {
+    for (const entry of readdirSync2(AMEND_DIR)) {
+      run(`rm -rf "${AMEND_DIR}/${entry}"`);
+    }
+  }
+  if (existsSync3(`${old}/.git`)) {
+    run(`git -C "${old}" worktree prune 2>/dev/null || true`, { quiet: true });
+  }
+  clearActive();
+}
 function bindLocal(path, force) {
   const abs = resolvePath(path);
-  if (!checkRebind(abs, force))
+  if (!checkRebind({ remote: null, path: abs }, force))
     return;
   if (!existsSync3(abs)) {
     throw new Error(`No such directory: ${abs}. Run 'folio create ${path}'?`);
@@ -1127,24 +1162,18 @@ function bindLocal(path, force) {
     throw new Error(`${abs} has no 'main' branch. Folio uses main as published truth.`);
   }
   ensureConfig();
+  detachCurrent();
   writeConfig("path", abs);
   writeConfig("strategy", "merge");
   writeConfig("remote", "");
-  clearActive();
   ensureBase();
   console.log(`✓ Bound to ${abs} (local).`);
-}
-function cmdBind(args) {
-  const remote = args[0];
-  if (!remote)
-    throw new Error("Usage: folio bind <ns/repo | path> [--web]");
-  const hasWeb = args.includes("--web");
-  if (isLocalTarget(remote)) {
-    bindLocal(remote, args.includes("--force"));
-    return;
+  const origin = parseGitHubOrigin(abs);
+  if (origin) {
+    console.log(`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`);
   }
-  if (!checkRebind(remote, args.includes("--force")))
-    return;
+}
+function checkRemoteAccess(remote) {
   console.log(`Checking access to ${remote}...`);
   const authCheck = run(`git ls-remote git@github.com:${remote}.git HEAD`, {
     quiet: true
@@ -1152,6 +1181,11 @@ function cmdBind(args) {
   if (authCheck.exitCode !== 0) {
     throw new Error(`Cannot access ${remote}. Check your SSH setup or repo URL. Run: gh auth status`);
   }
+}
+function bindRemote(remote, force) {
+  if (!checkRebind({ remote, path: null }, force))
+    return;
+  checkRemoteAccess(remote);
   ensureConfig();
   if (existsSync3(`${BASE_REPO}/.git`)) {
     const existingUrl = run(`git -C "${BASE_REPO}" remote get-url origin 2>/dev/null || echo ""`, { quiet: true }).stdout;
@@ -1160,6 +1194,7 @@ function cmdBind(args) {
       run(`rm -rf "${BASE_REPO}"`);
     }
   }
+  detachCurrent();
   writeConfig("remote", remote);
   writeConfig("strategy", "pr");
   writeConfig("path", "");
@@ -1170,6 +1205,63 @@ function cmdBind(args) {
   if (ff.stdout)
     console.log(`  ${ff.stdout}`);
   console.log(`✓ Bound to ${remote}.`);
+}
+function bindRemoteInto(remote, path, force) {
+  if (!REPO_SHAPE.test(remote) || existsSync3(resolvePath(remote))) {
+    throw new Error(`'${remote}' doesn't look like <owner/repo>. Usage: folio bind <owner/repo> <path>`);
+  }
+  const abs = resolvePath(path);
+  if (!checkRebind({ remote, path: abs }, force))
+    return;
+  if (existsSync3(abs) && readdirSync2(abs).length > 0) {
+    throw new Error(`${abs} already exists and is not empty.`);
+  }
+  checkRemoteAccess(remote);
+  ensureConfig();
+  console.log(`Cloning ${remote} into ${abs}...`);
+  const clone = run(`git clone --quiet git@github.com:${remote}.git "${abs}"`);
+  if (clone.exitCode !== 0) {
+    throw new Error(`Failed to clone ${remote}. Check access and try again.`);
+  }
+  run(`git -C "${abs}" config extensions.worktreeConfig true`, {
+    quiet: true
+  });
+  detachCurrent();
+  writeConfig("remote", remote);
+  writeConfig("path", abs);
+  writeConfig("strategy", "pr");
+  writeConfig("source", "");
+  console.log(`✓ Bound to ${remote} at ${abs}.`);
+}
+function cmdBind(args) {
+  const positionals = args.filter((a) => !a.startsWith("--"));
+  const target = positionals[0];
+  const pathArg = positionals[1];
+  if (!target) {
+    throw new Error("Usage: folio bind <ns/repo | path> [path] [--remote|--local] [--web] [--force]");
+  }
+  const force = args.includes("--force");
+  const hasWeb = args.includes("--web");
+  const wantRemote = args.includes("--remote");
+  const wantLocal = args.includes("--local");
+  if (wantRemote && wantLocal) {
+    throw new Error("--remote and --local are mutually exclusive.");
+  }
+  if (pathArg) {
+    if (wantLocal) {
+      throw new Error("--local doesn't apply to 'folio bind <owner/repo> <path>'.");
+    }
+    bindRemoteInto(target, pathArg, force);
+    if (hasWeb)
+      cmdWeb([]);
+    return;
+  }
+  const kind = wantRemote ? "remote" : wantLocal ? "local" : resolveBindTarget(target);
+  if (kind === "local") {
+    bindLocal(target, force);
+    return;
+  }
+  bindRemote(target, force);
   if (hasWeb) {
     cmdWeb([]);
   }
@@ -1237,7 +1329,7 @@ function cmdDraft(args) {
         console.log(`Draft '${branch2}' was already published. Deleting and starting fresh...`);
         run(`git -C "${baseRepo()}" branch -D "${branch2}" 2>/dev/null || true`);
         if (hasRemote()) {
-          run(`git push origin --delete "${branch2}" 2>/dev/null || true`);
+          run(`git -C "${baseRepo()}" push origin --delete "${branch2}" 2>/dev/null || true`);
         }
         run(`rm -rf "${path}"`);
       } else {
@@ -1262,8 +1354,8 @@ function cmdDraft(args) {
   }
   ensureBase();
   if (hasRemote()) {
-    run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
-    run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`);
+    run(`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null || true`);
+    run(`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null || true`);
   }
   const branch = `amend/${slug}`;
   console.log(`Creating draft worktree for '${slug}'...`);
@@ -1417,6 +1509,10 @@ function cmdPublish(_args) {
     throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
   }
   console.log(`✓ Published '${active}' — PR #${prNum} merged.`);
+  const ff = run(`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`, { quiet: true });
+  if (ff.exitCode !== 0) {
+    console.log("  (couldn't fast-forward main from origin — run 'folio status -u')");
+  }
   cleanupDraft(active, path, branch);
 }
 function cmdDrop(args) {
@@ -1467,7 +1563,7 @@ function cmdDrop(args) {
     console.log(`  Closed PR #${prNum}.`);
   }
   if (remoteBound && branch && branch !== "?") {
-    run(`git push origin --delete "${branch}" 2>/dev/null || true`);
+    run(`git -C "${baseRepo()}" push origin --delete "${branch}" 2>/dev/null || true`);
     console.log(`  Deleted remote branch '${branch}'.`);
   }
   run(`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`);
@@ -1495,9 +1591,9 @@ function cmdStatus(args = []) {
   const bound = boundPath ?? remote;
   let fetchFailed = false;
   if (hasRemote()) {
-    const before = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
+    const before = run(`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
     fetchMain();
-    const after = run(`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
+    const after = run(`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`, { quiet: true }).stdout;
     fetchFailed = before === "" && after === "";
   }
   const staleNote = fetchFailed ? " (couldn't reach remote — showing cached state)" : "";
@@ -1514,7 +1610,7 @@ function cmdStatus(args = []) {
       const behind = mainExists() ? behindCount() : 0;
       if (behind > 0) {
         if (update) {
-          const pull = run(`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>&1`);
+          const pull = run(`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>&1`);
           if (pull.exitCode !== 0) {
             throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
           }
@@ -1604,6 +1700,21 @@ function cmdConfig(args) {
     const val = readConfig(key);
     console.log(val || "");
     return;
+  }
+  if (key === "path" || key === "source") {
+    throw new Error("path is set at bind time — run 'folio bind <owner/repo | path> [path]' to move the checkout.");
+  }
+  if (key === "strategy") {
+    if (value !== "merge" && value !== "pr") {
+      throw new Error("strategy must be 'merge' or 'pr'.");
+    }
+    if (value === "pr" && !hasRemote()) {
+      const origin = getPath() ? parseGitHubOrigin(baseRepo()) : null;
+      if (origin) {
+        throw new Error(`strategy pr needs a remote. origin is github.com/${origin} — run 'folio config remote ${origin}', then retry.`);
+      }
+      throw new Error("strategy pr needs a remote — run 'folio config remote <owner/repo>' first.");
+    }
   }
   writeConfig(key, value);
 }
@@ -1718,6 +1829,7 @@ folio — knowledge management CLI
 Usage:
   folio --version | -v             Print the CLI version
   folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
+  folio bind <ns/repo> <path>      Bind to a knowledge repo, cloned into <path>
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
   folio draft <topic>              Start or resume a draft (--force to restart)

@@ -66,9 +66,20 @@ export function ensureBase(remote?: string): void {
 	const path = getPath();
 	if (path) {
 		if (!existsSync(`${path}/.git`)) {
-			throw new Error(
-				`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`,
-			);
+			// A remote-backed checkout at a custom path can be recreated.
+			const repo = remote ?? readConfig("remote");
+			if (!repo) {
+				throw new Error(
+					`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`,
+				);
+			}
+			console.log(`Recreating checkout of ${repo} at ${path}...`);
+			const r = run(`git clone --quiet git@github.com:${repo}.git "${path}"`);
+			if (r.exitCode !== 0) {
+				throw new Error(
+					`Failed to clone ${repo} into ${path}. Check access and try again.`,
+				);
+			}
 		}
 		run(`git -C "${path}" config extensions.worktreeConfig true`, {
 			quiet: true,
@@ -99,7 +110,7 @@ export function mainExists(): boolean {
 
 export function fetchMain(): void {
 	if (!hasRemote()) return;
-	run(`git -C "${BASE_REPO}" fetch origin main --quiet`, { quiet: true });
+	run(`git -C "${baseRepo()}" fetch origin main --quiet`, { quiet: true });
 }
 
 export function currentBranch(): string {
@@ -111,10 +122,19 @@ export function currentBranch(): string {
 export function behindCount(): number {
 	if (!hasRemote()) return 0;
 	const result = run(
-		`git -C "${BASE_REPO}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`,
+		`git -C "${baseRepo()}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`,
 		{ quiet: true },
 	);
 	return Number.parseInt(result.stdout || "0", 10);
+}
+
+/** Parse a repo's `origin` URL for a GitHub owner/repo, if any. */
+export function parseGitHubOrigin(repoPath: string): string | null {
+	const url = run(`git -C "${repoPath}" remote get-url origin 2>/dev/null`, {
+		quiet: true,
+	}).stdout;
+	const match = url.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
+	return match ? match[1] : null;
 }
 
 /** Whether an amendment branch has been merged into main. */

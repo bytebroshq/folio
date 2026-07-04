@@ -13,10 +13,10 @@ folio publish           # squash-merges after human approval; cleans up the bran
 
 ## Strategy
 
-`folio config` reports the binding: a `remote` value (e.g. `owner/repo`) means GitHub mode; a `source` value means local mode.
+`folio config` reports the binding as three keys: `remote` (owner/repo, if GitHub-backed), `path` (where the checkout lives), and `strategy` — which names what `publish` does.
 
-- **GitHub mode** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.
-- **Local mode** — no remote or PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` merges when the human says so.
+- **`strategy: pr`** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.
+- **`strategy: merge`** — no PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` merges when the human says so.
 
 ## Rules
 

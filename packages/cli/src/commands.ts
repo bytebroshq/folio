@@ -32,6 +32,7 @@ import {
 	listAmendments,
 	mainExists,
 	mainRef,
+	parseGitHubOrigin,
 	run,
 	worktreeExists,
 } from "./git";
@@ -60,35 +61,68 @@ function printStatusFooter(bound: string, path: string): void {
 
 // ── bind ───────────────────────────────────────────────────────────
 
-/** A bind target is local when it points at the filesystem, not ns/repo. */
-function isLocalTarget(target: string): boolean {
-	if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target)) return true;
-	return existsSync(resolvePath(target));
+const REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
+
+/**
+ * Decide how a single bind positional is interpreted: an existing directory
+ * (or path-marked target) binds a local repo in place; anything else is
+ * treated as a GitHub owner/repo. --remote / --local override this.
+ */
+function resolveBindTarget(target: string): "local" | "remote" {
+	if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target)) return "local";
+	return existsSync(resolvePath(target)) ? "local" : "remote";
 }
 
-function currentBinding(): string | null {
-	return getPath() ?? readConfig("remote");
+/** A binding is the (remote, path) pair — either half may be unset. */
+type Binding = { remote: string | null; path: string | null };
+
+function currentBinding(): Binding {
+	return { remote: readConfig("remote"), path: getPath() };
+}
+
+function describeBinding(b: Binding): string {
+	if (b.remote && b.path) return `${b.remote} · ${b.path}`;
+	return b.remote ?? b.path ?? "(none)";
 }
 
 /** Guard against silently discarding an existing binding's amendments. */
-function checkRebind(target: string, force: boolean): boolean {
+function checkRebind(next: Binding, force: boolean): boolean {
 	const current = currentBinding();
-	if (current === target) {
-		console.log(`Already bound to ${target}.`);
+	if (!current.remote && !current.path) return true;
+	if (current.remote === next.remote && current.path === next.path) {
+		console.log(`Already bound to ${describeBinding(current)}.`);
 		return false;
 	}
-	if (current && !force) {
+	if (!force) {
 		throw new Error(
-			`Currently bound to ${current}. All amendments will be lost. Use --force to re-bind.`,
+			`Currently bound to ${describeBinding(current)}. All amendments will be lost. Use --force to re-bind.`,
 		);
 	}
 	return true;
 }
 
+/**
+ * Detach from the current binding: drop amendment worktrees and active
+ * state. Never touches the bound directory itself — a custom path is the
+ * user's checkout; only the managed clone is folio-owned.
+ */
+function detachCurrent(): void {
+	const old = baseRepo();
+	if (existsSync(AMEND_DIR)) {
+		for (const entry of readdirSync(AMEND_DIR)) {
+			run(`rm -rf "${AMEND_DIR}/${entry}"`);
+		}
+	}
+	if (existsSync(`${old}/.git`)) {
+		run(`git -C "${old}" worktree prune 2>/dev/null || true`, { quiet: true });
+	}
+	clearActive();
+}
+
 function bindLocal(path: string, force: boolean): void {
 	const abs = resolvePath(path);
 
-	if (!checkRebind(abs, force)) return;
+	if (!checkRebind({ remote: null, path: abs }, force)) return;
 
 	if (!existsSync(abs)) {
 		throw new Error(`No such directory: ${abs}. Run 'folio create ${path}'?`);
@@ -109,29 +143,25 @@ function bindLocal(path: string, force: boolean): void {
 	}
 
 	ensureConfig();
+	detachCurrent();
 	writeConfig("path", abs);
 	writeConfig("strategy", "merge");
 	writeConfig("remote", "");
-	clearActive();
 	ensureBase();
 
 	console.log(`✓ Bound to ${abs} (local).`);
+
+	// Promotion nudge: a GitHub origin can review via draft PRs instead.
+	const origin = parseGitHubOrigin(abs);
+	if (origin) {
+		console.log(
+			`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`,
+		);
+	}
 }
 
-export function cmdBind(args: string[]): void {
-	const remote = args[0];
-	if (!remote) throw new Error("Usage: folio bind <ns/repo | path> [--web]");
-
-	const hasWeb = args.includes("--web");
-
-	if (isLocalTarget(remote)) {
-		bindLocal(remote, args.includes("--force"));
-		return;
-	}
-
-	if (!checkRebind(remote, args.includes("--force"))) return;
-
-	// Auth check before any git work
+/** Verify SSH access to a GitHub repo before any state changes. */
+function checkRemoteAccess(remote: string): void {
 	console.log(`Checking access to ${remote}...`);
 	const authCheck = run(`git ls-remote git@github.com:${remote}.git HEAD`, {
 		quiet: true,
@@ -141,10 +171,16 @@ export function cmdBind(args: string[]): void {
 			`Cannot access ${remote}. Check your SSH setup or repo URL. Run: gh auth status`,
 		);
 	}
+}
 
+/** Bind a GitHub remote with its checkout at the managed default path. */
+function bindRemote(remote: string, force: boolean): void {
+	if (!checkRebind({ remote, path: null }, force)) return;
+
+	checkRemoteAccess(remote);
 	ensureConfig();
 
-	// If base exists from a different remote, nuke it
+	// If base exists from a different remote, nuke it (folio-owned clone).
 	if (existsSync(`${BASE_REPO}/.git`)) {
 		const existingUrl = run(
 			`git -C "${BASE_REPO}" remote get-url origin 2>/dev/null || echo ""`,
@@ -156,6 +192,7 @@ export function cmdBind(args: string[]): void {
 		}
 	}
 
+	detachCurrent();
 	writeConfig("remote", remote);
 	writeConfig("strategy", "pr");
 	writeConfig("path", "");
@@ -174,6 +211,86 @@ export function cmdBind(args: string[]): void {
 	if (ff.stdout) console.log(`  ${ff.stdout}`);
 
 	console.log(`✓ Bound to ${remote}.`);
+}
+
+/** Bind a GitHub remote, cloning the checkout into a user-chosen path. */
+function bindRemoteInto(remote: string, path: string, force: boolean): void {
+	if (!REPO_SHAPE.test(remote) || existsSync(resolvePath(remote))) {
+		throw new Error(
+			`'${remote}' doesn't look like <owner/repo>. Usage: folio bind <owner/repo> <path>`,
+		);
+	}
+
+	const abs = resolvePath(path);
+	if (!checkRebind({ remote, path: abs }, force)) return;
+
+	if (existsSync(abs) && readdirSync(abs).length > 0) {
+		throw new Error(`${abs} already exists and is not empty.`);
+	}
+
+	checkRemoteAccess(remote);
+	ensureConfig();
+
+	console.log(`Cloning ${remote} into ${abs}...`);
+	const clone = run(`git clone --quiet git@github.com:${remote}.git "${abs}"`);
+	if (clone.exitCode !== 0) {
+		throw new Error(`Failed to clone ${remote}. Check access and try again.`);
+	}
+	run(`git -C "${abs}" config extensions.worktreeConfig true`, {
+		quiet: true,
+	});
+
+	detachCurrent();
+	writeConfig("remote", remote);
+	writeConfig("path", abs);
+	writeConfig("strategy", "pr");
+	writeConfig("source", "");
+
+	console.log(`✓ Bound to ${remote} at ${abs}.`);
+}
+
+export function cmdBind(args: string[]): void {
+	const positionals = args.filter((a) => !a.startsWith("--"));
+	const target = positionals[0];
+	const pathArg = positionals[1];
+	if (!target) {
+		throw new Error(
+			"Usage: folio bind <ns/repo | path> [path] [--remote|--local] [--web] [--force]",
+		);
+	}
+
+	const force = args.includes("--force");
+	const hasWeb = args.includes("--web");
+	const wantRemote = args.includes("--remote");
+	const wantLocal = args.includes("--local");
+	if (wantRemote && wantLocal) {
+		throw new Error("--remote and --local are mutually exclusive.");
+	}
+
+	// Two positionals: clone <owner/repo> into <path>.
+	if (pathArg) {
+		if (wantLocal) {
+			throw new Error(
+				"--local doesn't apply to 'folio bind <owner/repo> <path>'.",
+			);
+		}
+		bindRemoteInto(target, pathArg, force);
+		if (hasWeb) cmdWeb([]);
+		return;
+	}
+
+	const kind = wantRemote
+		? "remote"
+		: wantLocal
+			? "local"
+			: resolveBindTarget(target);
+
+	if (kind === "local") {
+		bindLocal(target, force);
+		return;
+	}
+
+	bindRemote(target, force);
 
 	// --web: open browser to web URL
 	if (hasWeb) {
@@ -264,7 +381,9 @@ export function cmdDraft(args: string[]): void {
 				);
 				run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
 				if (hasRemote()) {
-					run(`git push origin --delete "${branch}" 2>/dev/null || true`);
+					run(
+						`git -C "${baseRepo()}" push origin --delete "${branch}" 2>/dev/null || true`,
+					);
 				}
 				run(`rm -rf "${path}"`);
 			} else {
@@ -301,9 +420,9 @@ export function cmdDraft(args: string[]): void {
 	// Ensure main is fresh
 	ensureBase();
 	if (hasRemote()) {
-		run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
+		run(`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null || true`);
 		run(
-			`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`,
+			`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null || true`,
 		);
 	}
 
@@ -542,6 +661,18 @@ export function cmdPublish(_args: string[]): void {
 		throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
 	}
 	console.log(`✓ Published '${active}' — PR #${prNum} merged.`);
+
+	// Under pr strategy main follows origin — fast-forward the checkout.
+	const ff = run(
+		`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`,
+		{ quiet: true },
+	);
+	if (ff.exitCode !== 0) {
+		console.log(
+			"  (couldn't fast-forward main from origin — run 'folio status -u')",
+		);
+	}
+
 	cleanupDraft(active, path, branch);
 }
 
@@ -616,7 +747,9 @@ export function cmdDrop(args: string[]): void {
 
 	// Delete remote branch
 	if (remoteBound && branch && branch !== "?") {
-		run(`git push origin --delete "${branch}" 2>/dev/null || true`);
+		run(
+			`git -C "${baseRepo()}" push origin --delete "${branch}" 2>/dev/null || true`,
+		);
 		console.log(`  Deleted remote branch '${branch}'.`);
 	}
 
@@ -668,12 +801,12 @@ export function cmdStatus(args: string[] = []): void {
 	let fetchFailed = false;
 	if (hasRemote()) {
 		const before = run(
-			`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`,
+			`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`,
 			{ quiet: true },
 		).stdout;
 		fetchMain();
 		const after = run(
-			`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`,
+			`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`,
 			{ quiet: true },
 		).stdout;
 		fetchFailed = before === "" && after === "";
@@ -704,7 +837,7 @@ export function cmdStatus(args: string[] = []): void {
 			if (behind > 0) {
 				if (update) {
 					const pull = run(
-						`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>&1`,
+						`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>&1`,
 					);
 					if (pull.exitCode !== 0) {
 						throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
@@ -815,6 +948,30 @@ export function cmdConfig(args: string[]): void {
 		const val = readConfig(key as ConfigKey);
 		console.log(val || "");
 		return;
+	}
+
+	// Location is a bind-time decision — moving the checkout means re-binding.
+	if (key === "path" || key === "source") {
+		throw new Error(
+			"path is set at bind time — run 'folio bind <owner/repo | path> [path]' to move the checkout.",
+		);
+	}
+
+	if (key === "strategy") {
+		if (value !== "merge" && value !== "pr") {
+			throw new Error("strategy must be 'merge' or 'pr'.");
+		}
+		if (value === "pr" && !hasRemote()) {
+			const origin = getPath() ? parseGitHubOrigin(baseRepo()) : null;
+			if (origin) {
+				throw new Error(
+					`strategy pr needs a remote. origin is github.com/${origin} — run 'folio config remote ${origin}', then retry.`,
+				);
+			}
+			throw new Error(
+				"strategy pr needs a remote — run 'folio config remote <owner/repo>' first.",
+			);
+		}
 	}
 
 	// Write key-value

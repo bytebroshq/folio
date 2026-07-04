@@ -44,6 +44,12 @@ Example:
 folio bind bytebroshq/knowledge
 ```
 
+Or clone it somewhere you choose instead of the managed default:
+
+```bash
+folio bind bytebroshq/knowledge ~/notes/knowledge
+```
+
 Or bind a local git repo in place — no GitHub, no `gh`:
 
 ```bash
@@ -58,31 +64,39 @@ folio create ~/notes/my-folio
 
 ## Mental model
 
-Folio has one bound repo, in one of two modes:
+A binding has two independent knobs:
 
-- **GitHub mode** — bound with `folio bind <owner/repo>`. Folio manages a
-  canonical clone; `folio sync` pushes amendment branches and opens draft PRs
-  for review on GitHub.
-- **Local mode** — bound with `folio bind <path>` or `folio create <path>`.
-  The bound directory *is* the repo; there is no clone and no remote.
-  `folio sync` commits and rebases the amendment onto `main` in place; you
-  merge with plain `git merge` when ready.
+- **Location** (`path`) — where the checkout lives. By default folio manages
+  a clone at `~/.config/folio/stores/.main`; a custom `path` puts the
+  checkout in a directory you own, and folio never deletes or rewrites it.
+- **Strategy** (`strategy`) — what `publish` does. `merge` merges the draft
+  into `main` locally; `pr` pushes the draft branch and review happens in a
+  draft pull request on GitHub (needs a `remote` and `gh`).
 
-`folio config` shows which mode is active: a `source` path means local, a
-`remote` means GitHub.
+The combinations:
+
+| Bind                                            | remote | path      | strategy |
+| ----------------------------------------------- | ------ | --------- | -------- |
+| `folio bind owner/repo`                         | set    | (managed) | pr       |
+| `folio bind owner/repo ~/kb`                    | set    | `~/kb`    | pr       |
+| `folio bind ~/kb` (or `folio create ~/kb`)      | unset  | `~/kb`    | merge    |
+| local bind + `folio config strategy pr`         | set    | `~/kb`    | pr       |
+
+`folio config` reports all three keys.
 
 ```text
 ~/.config/folio/
   config.yml
   stores/
-    .main/                 # canonical clone (GitHub mode only)
+    .main/                 # managed clone (default location only)
     amendments/
       my-topic/             # isolated worktree for one amendment
 ```
 
-In local mode, `amendments/` holds worktrees of the bound repo directly —
-there is no `.main` clone. You normally do not edit main directly. You
-create an amendment, edit files in that amendment, then sync it.
+With a custom `path`, `amendments/` holds worktrees of that checkout
+directly — there is no `.main` clone. You normally do not edit main
+directly. You open a draft, edit files in that draft, then proof and
+publish it.
 
 ## Basic workflow
 
@@ -92,10 +106,10 @@ Bind once:
 folio bind <owner/repo>
 ```
 
-Create an amendment:
+Open a draft:
 
 ```bash
-folio switch -c my-topic
+folio draft my-topic
 ```
 
 Edit files here:
@@ -139,7 +153,7 @@ Pending save, run `folio save`
 Bound to owner/repo · ~/.config/folio/stores/amendments/my-draft
 ```
 
-Local mode collapses repeated paths:
+An in-place binding collapses repeated paths:
 
 ```text
 No drafts
@@ -148,28 +162,27 @@ Up to date
 Bound to /path/to/local-folio
 ```
 
-Sync — commits, rebases, and (GitHub mode) publishes or updates the draft PR:
+Save, then proof — lints, rebases, and (pr strategy) pushes + opens or
+updates the draft PR; under merge strategy it shows the diff vs main:
 
 ```bash
-folio sync -m "describe the change"
+folio save -m "describe the change"
+folio proof
 ```
 
-In local mode, `sync` stops after commit + rebase and prints the `git merge`
-command to run against the bound repo when the amendment is ready.
+Publish — merges into main (pr strategy: only once the PR is marked ready):
 
-List amendments:
+```bash
+folio publish
+```
+
+List drafts:
 
 ```bash
 folio list
 ```
 
-Switch amendments:
-
-```bash
-folio switch my-topic
-```
-
-Drop an amendment:
+Drop a draft:
 
 ```bash
 folio drop my-topic --force
@@ -178,24 +191,26 @@ folio drop my-topic --force
 ## Commands
 
 ```text
-folio bind <owner/repo> [--web]      bind this machine to a GitHub-backed knowledge repo
+folio bind <owner/repo> [--web]      bind to a GitHub-backed knowledge repo (managed clone)
+folio bind <owner/repo> <path>       bind to a GitHub-backed knowledge repo, cloned into <path>
 folio bind <path>                    bind in place to a local git repo
+folio bind ... --remote|--local      force how an ambiguous target is read
 folio create <path>                  scaffold a new folio and bind to it
+folio draft <topic>                  start or resume a draft (--force to restart)
+folio save [-m "message"]            save changes in the active draft
+folio proof                          lint + rebase; push + draft PR (pr) or show diff (merge)
+folio publish                        merge the draft into main (pr: only once PR is ready)
 folio status [-u] [-x]               show current state; -u updates, -x includes PR context
-folio list                           list local amendments
-folio switch                         list local amendments
-folio switch -c <topic>              create and enter an amendment
-folio switch <topic>                 enter an existing amendment
-folio sync [-m "message"]            commit, rebase, and (GitHub mode) push + open/update draft PR
-folio drop <topic> --force           delete a local amendment (and its remote branch, in GitHub mode)
-folio web                            open the web review surface (GitHub mode only)
+folio list                           list drafts
+folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
+folio web                            open the web review surface (needs a remote)
 folio config                         show config
 folio config <key> <value>           set config
 ```
 
 ## Web
 
-Folio Web reviews GitHub-backed folios; it has no role in local mode.
+Folio Web reviews GitHub-backed folios; it needs a `remote` configured.
 
 The CLI can open Folio Web for the bound repo:
 
@@ -229,7 +244,9 @@ store: git
 active:
 ```
 
-`config` also shows a `source` key (set in local mode) and resolved `path` /
+Binding sets the three binding keys — `remote` (owner/repo, when
+GitHub-backed), `path` (checkout location, blank for the managed clone), and
+`strategy` (`merge` or `pr`). `config` also shows the resolved checkout and
 `amendments` locations.
 
 Set values:
@@ -238,6 +255,11 @@ Set values:
 folio config web https://folio-web.bytebros.workers.dev
 ```
 
+`strategy` can be switched between `merge` and `pr`; `pr` requires a
+`remote` (set one with `folio config remote <owner/repo>` if the checkout's
+git origin points at GitHub). `path` cannot be set here — location is a
+bind-time decision, so changing it means `folio bind`.
+
 Rebind to a different repo, GitHub or local:
 
 ```bash
@@ -245,7 +267,8 @@ folio bind <owner/repo> --force
 folio bind <path> --force
 ```
 
-Rebinding removes the local store and amendments for the previous binding.
+Rebinding drops the amendments for the previous binding. The managed clone
+may be re-cloned; a custom `path` directory is yours and is never deleted.
 
 ## Development
 
