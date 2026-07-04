@@ -10,9 +10,10 @@ import {
 	clearActive,
 	ensureConfig,
 	getActive,
+	getPath,
 	getRemote,
-	getSource,
-	isLocal,
+	getStrategy,
+	hasRemote,
 	readConfig,
 	resolvePath,
 	setActive,
@@ -66,7 +67,7 @@ function isLocalTarget(target: string): boolean {
 }
 
 function currentBinding(): string | null {
-	return getSource() ?? readConfig("remote");
+	return getPath() ?? readConfig("remote");
 }
 
 /** Guard against silently discarding an existing binding's amendments. */
@@ -108,7 +109,8 @@ function bindLocal(path: string, force: boolean): void {
 	}
 
 	ensureConfig();
-	writeConfig("source", abs);
+	writeConfig("path", abs);
+	writeConfig("strategy", "merge");
 	writeConfig("remote", "");
 	clearActive();
 	ensureBase();
@@ -155,6 +157,8 @@ export function cmdBind(args: string[]): void {
 	}
 
 	writeConfig("remote", remote);
+	writeConfig("strategy", "pr");
+	writeConfig("path", "");
 	writeConfig("source", "");
 	ensureBase(remote);
 
@@ -259,7 +263,7 @@ export function cmdDraft(args: string[]): void {
 					`Draft '${branch}' was already published. Deleting and starting fresh...`,
 				);
 				run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
-				if (!isLocal()) {
+				if (hasRemote()) {
 					run(`git push origin --delete "${branch}" 2>/dev/null || true`);
 				}
 				run(`rm -rf "${path}"`);
@@ -280,7 +284,7 @@ export function cmdDraft(args: string[]): void {
 					`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio proof'.`,
 				);
 			}
-			if (!isLocal()) {
+			if (hasRemote()) {
 				run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
 			}
 			setActive(slug);
@@ -296,7 +300,7 @@ export function cmdDraft(args: string[]): void {
 
 	// Ensure main is fresh
 	ensureBase();
-	if (!isLocal()) {
+	if (hasRemote()) {
 		run(`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || true`);
 		run(
 			`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || true`,
@@ -389,7 +393,7 @@ export function cmdSave(args: string[]): void {
 
 export function cmdProof(args: string[]): void {
 	ensureConfig();
-	const local = isLocal();
+	const local = getStrategy() === "merge";
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
@@ -485,7 +489,7 @@ function cleanupDraft(active: string, path: string, branch: string): void {
 
 export function cmdPublish(_args: string[]): void {
 	ensureConfig();
-	const local = isLocal();
+	const local = getStrategy() === "merge";
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
@@ -562,12 +566,13 @@ export function cmdDrop(args: string[]): void {
 	}
 
 	const branch = amendmentBranch(path);
-	const local = isLocal();
-	const remote = local ? "" : getRemote();
+	const remoteBound = hasRemote();
+	const merge = getStrategy() === "merge";
+	const remote = remoteBound ? getRemote() : "";
 
 	// Check for open PR
 	let prNum = "";
-	if (!local && branch && branch !== "?") {
+	if (remoteBound && branch && branch !== "?") {
 		const prResult = gh(
 			`pr list --head "${branch}" --state open --json number --jq '.[0].number'`,
 			remote,
@@ -610,7 +615,7 @@ export function cmdDrop(args: string[]): void {
 	}
 
 	// Delete remote branch
-	if (!local && branch && branch !== "?") {
+	if (remoteBound && branch && branch !== "?") {
 		run(`git push origin --delete "${branch}" 2>/dev/null || true`);
 		console.log(`  Deleted remote branch '${branch}'.`);
 	}
@@ -620,9 +625,10 @@ export function cmdDrop(args: string[]): void {
 		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
 	);
 
-	// Local mode keeps branches in the bound repo — clean up the amend branch
-	// unless it was merged (drop --force may discard unmerged work by design).
-	if (local && branch && branch !== "?") {
+	// Merge strategy keeps branches in the bound repo — clean up the amend
+	// branch unless it was merged (drop --force may discard unmerged work by
+	// design).
+	if (merge && branch && branch !== "?") {
 		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
 	}
 	console.log(`✓ Dropped amendment '${slug}'.`);
@@ -642,25 +648,25 @@ export function cmdStatus(args: string[] = []): void {
 	ensureConfig();
 
 	const remote = readConfig("remote");
-	const source = getSource();
-	if (!remote && !source) {
+	const boundPath = getPath();
+	if (!remote && !boundPath) {
 		console.log(
 			"No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.",
 		);
 		return;
 	}
 
-	const local = isLocal();
+	const local = getStrategy() === "merge";
 	const extended =
 		args.includes("-x") ||
 		args.includes("--extended") ||
 		args.includes("-f") ||
 		args.includes("--full");
 	const update = args.includes("-u") || args.includes("--update");
-	const bound = source ?? (remote as string);
+	const bound = boundPath ?? (remote as string);
 
 	let fetchFailed = false;
-	if (!local) {
+	if (hasRemote()) {
 		const before = run(
 			`git -C "${BASE_REPO}" rev-parse origin/main 2>/dev/null`,
 			{ quiet: true },
@@ -786,18 +792,20 @@ export function cmdConfig(args: string[]): void {
 	if (!key) {
 		// Show all config
 		const remote = readConfig("remote") || "(not set)";
-		const source = readConfig("source") || "(not set)";
-		const active = readConfig("active") || "(not set)";
-		const web = readConfig("web") || "(not set)";
+		const path = getPath() || "(not set)";
+		const strategy = getStrategy();
 		const store = readConfig("store") || "(not set)";
-		const bound = readConfig("remote") || readConfig("source");
+		const web = readConfig("web") || "(not set)";
+		const active = readConfig("active") || "(not set)";
+		const bound = readConfig("remote") || getPath();
 		console.log(`remote: ${remote}`);
-		console.log(`source: ${source}`);
+		console.log(`path: ${path}`);
+		console.log(`strategy: ${strategy}`);
 		console.log(`store: ${store}`);
 		console.log(`web: ${web}`);
 		console.log(`active: ${active}`);
 		// Resolved paths (computed, not stored)
-		console.log(`path: ${bound ? baseRepo() : "(not bound)"}`);
+		console.log(`resolved: ${bound ? baseRepo() : "(not bound)"}`);
 		console.log(`amendments: ${AMEND_DIR}`);
 		return;
 	}
@@ -823,7 +831,7 @@ export function cmdWeb(args: string[]): void {
 
 	const remote = readConfig("remote");
 	if (!remote) {
-		if (isLocal()) {
+		if (getPath()) {
 			throw new Error(
 				"Bound to a local repo — folio web needs a GitHub remote. Run 'folio bind <ns/repo>'.",
 			);

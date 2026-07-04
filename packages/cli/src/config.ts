@@ -9,7 +9,14 @@ export const AMEND_DIR = `${STORE_DIR}/amendments`;
 export const CONFIG_FILE = `${FOLIO_HOME}/config.yml`;
 export const BASE_REPO = `${STORE_DIR}/.main`;
 
-export type ConfigKey = "remote" | "store" | "active" | "web" | "source";
+export type ConfigKey =
+	| "remote"
+	| "store"
+	| "active"
+	| "web"
+	| "source"
+	| "path"
+	| "strategy";
 
 /**
  * Read a config value, or the whole file when no key is given.
@@ -62,6 +69,14 @@ export function ensureConfig(): void {
 		writeConfig("store", "git");
 		writeConfig("active", "");
 	}
+
+	// Migration shim: legacy configs stored the bind target under `source`.
+	// Promote it to `path` (the new location key) once, in place.
+	const legacySource = readConfig("source");
+	if (legacySource && !readConfig("path")) {
+		writeConfig("path", legacySource);
+		writeConfig("source", "");
+	}
 }
 
 export function getActive(): string | null {
@@ -95,23 +110,39 @@ export function getRemote(): string {
 	return remote;
 }
 
-// ── Local (in-place) binding ────────────────────────────────────────
+// ── Location / strategy (in-place binding) ──────────────────────────
 
-export function getSource(): string | null {
-	return readConfig("source");
-}
-
-/** True when bound in place to a local git repo instead of a GitHub remote. */
-export function isLocal(): boolean {
-	return !!getSource();
+/**
+ * Where the checkout lives: the explicit `path` key, falling back to the
+ * legacy `source` key for configs that haven't been migrated yet (belt and
+ * suspenders — `ensureConfig()` normally migrates this on read).
+ */
+export function getPath(): string | null {
+	return readConfig("path") ?? readConfig("source");
 }
 
 /**
- * The repo that main lives in: the bound local repo in local mode,
+ * The repo that main lives in: the bound local repo when `path` is set,
  * otherwise the managed clone.
  */
 export function baseRepo(): string {
-	return getSource() ?? BASE_REPO;
+	return getPath() ?? BASE_REPO;
+}
+
+/** True when a GitHub remote (owner/repo) is configured. */
+export function hasRemote(): boolean {
+	return !!readConfig("remote");
+}
+
+/**
+ * What `publish` does: explicit `strategy` key if set, otherwise derived
+ * for legacy configs — a remote implies the PR flow, its absence the merge
+ * flow.
+ */
+export function getStrategy(): "merge" | "pr" {
+	const explicit = readConfig("strategy");
+	if (explicit === "merge" || explicit === "pr") return explicit;
+	return hasRemote() ? "pr" : "merge";
 }
 
 /** Expand a leading ~ and resolve to an absolute path. */
