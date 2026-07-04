@@ -5,9 +5,9 @@ import type { LintContext, LintIssue } from "../types";
 import { extractFrontmatterField } from "./frontmatter";
 
 // An index entry (SPEC.md §7): a list line with a single bracket link
-// followed by an em dash (—) and description text. The description group is
-// optional so an entry with no description text still matches (and is
-// treated as an empty description below).
+// followed by a literal em dash (—) and description text. ASCII hyphens are
+// not entry delimiters. The description group is optional so an entry with no
+// description text still matches (and is treated as an empty description below).
 const INDEX_ENTRY_RE = /^-\s*\[\[([^\]|]+)(?:\|[^\]]+)?\]\]\s*(?:—\s*(.*))?$/;
 
 function normalizeWhitespace(value: string): string {

@@ -89,6 +89,19 @@ describe("descriptionSyncCheck", () => {
 		expect(descriptionSyncIssues()).toEqual([]);
 	});
 
+	test("ASCII hyphens are not treated as the index-entry delimiter", () => {
+		write(
+			"project-roadmap.md",
+			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
+		);
+		write(
+			"INDEX.md",
+			"# Index\n\n- [[project-roadmap]] -- Product build path.\n",
+		);
+
+		expect(descriptionSyncIssues()).toEqual([]);
+	});
+
 	test("whitespace differences are normalized before comparing", () => {
 		write(
 			"project-roadmap.md",
