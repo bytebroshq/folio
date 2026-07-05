@@ -38,6 +38,12 @@ import {
 } from "./git";
 import { openBrowser } from "./open";
 import { skillBundle } from "./skill-bundle.gen";
+import {
+	extractScent,
+	readIndexDescription,
+	readSkillDescription,
+	restampSkillFile,
+} from "./skill-scent";
 
 // ── Formatting helpers ──────────────────────────────────────────────
 
@@ -119,6 +125,27 @@ function detachCurrent(): void {
 	clearActive();
 }
 
+/**
+ * After a successful bind, refresh the installed skill's scent from the
+ * newly bound block's INDEX — only if a skill was ever installed (the
+ * `skill` config key is set) and its SKILL.md still exists there. Never
+ * fails the bind: any error is swallowed with a warning at most.
+ */
+function restampBoundSkill(): void {
+	const skillDir = readConfig("skill");
+	if (!skillDir) return;
+
+	const skillPath = join(skillDir, "SKILL.md");
+	if (!existsSync(skillPath)) return;
+
+	try {
+		restampSkillFile(skillPath, baseRepo());
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.log(`  (couldn't refresh skill description: ${msg})`);
+	}
+}
+
 function bindLocal(path: string, force: boolean): void {
 	const abs = resolvePath(path);
 
@@ -158,6 +185,8 @@ function bindLocal(path: string, force: boolean): void {
 			`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`,
 		);
 	}
+
+	restampBoundSkill();
 }
 
 /** Verify SSH access to a GitHub repo before any state changes. */
@@ -211,6 +240,7 @@ function bindRemote(remote: string, force: boolean): void {
 	if (ff.stdout) console.log(`  ${ff.stdout}`);
 
 	console.log(`✓ Bound to ${remote}.`);
+	restampBoundSkill();
 }
 
 /** Bind a GitHub remote, cloning the checkout into a user-chosen path. */
@@ -247,6 +277,7 @@ function bindRemoteInto(remote: string, path: string, force: boolean): void {
 	writeConfig("source", "");
 
 	console.log(`✓ Bound to ${remote} at ${abs}.`);
+	restampBoundSkill();
 }
 
 export function cmdBind(args: string[]): void {
@@ -777,6 +808,26 @@ export function cmdDrop(args: string[]): void {
 // ── status ─────────────────────────────────────────────────────────
 
 /** `folio status` fetches in pr strategy so update guidance is fresh. */
+/**
+ * Stateless drift check: does the installed skill's stamped scent still
+ * match the bound block's live INDEX description? Silent when there's no
+ * skill config key, no installed SKILL.md, or the two already agree.
+ */
+function printSkillDrift(): void {
+	const skillDir = readConfig("skill");
+	if (!skillDir) return;
+
+	const skillPath = join(skillDir, "SKILL.md");
+	const current = readSkillDescription(skillPath);
+	if (current === undefined) return;
+
+	const installedScent = extractScent(current);
+	const liveScent = readIndexDescription(baseRepo());
+	if (installedScent === liveScent) return;
+
+	console.log("Skill description out of date, run `folio skill install`");
+}
+
 export function cmdStatus(args: string[] = []): void {
 	ensureConfig();
 
@@ -788,6 +839,8 @@ export function cmdStatus(args: string[] = []): void {
 		);
 		return;
 	}
+
+	printSkillDrift();
 
 	const local = getStrategy() === "merge";
 	const extended =
@@ -1083,15 +1136,24 @@ export function cmdLint(args: string[]): void {
 // ── skill ──────────────────────────────────────────────────────────
 
 /**
- * Dumb file writer: unpacks the skill bundle embedded at build time into
- * <path>. Deliberately blind to any agent harness — it just writes files.
+ * Unpacks the skill bundle embedded at build time into <path>, then stamps
+ * the written SKILL.md's frontmatter `description` with the bound block's
+ * INDEX scent (SPEC.md §7), if any. Deliberately blind to any agent harness
+ * beyond that one stamp — it just writes files.
+ *
+ * Bare `folio skill install` (no path) reuses the path recorded under the
+ * `skill` config key from a prior install.
  */
 function skillInstall(target: string | undefined): void {
-	if (!target) {
-		throw new Error("Usage: folio skill install <path>");
+	const recorded = readConfig("skill");
+	const resolvedTarget = target ?? recorded;
+	if (!resolvedTarget) {
+		throw new Error(
+			"Usage: folio skill install <path> (no path recorded yet — pass one the first time)",
+		);
 	}
 
-	const abs = resolvePath(target);
+	const abs = resolvePath(resolvedTarget);
 	const files = Object.keys(skillBundle).sort();
 
 	for (const rel of files) {
@@ -1100,6 +1162,9 @@ function skillInstall(target: string | undefined): void {
 		writeFileSync(dest, skillBundle[rel] as string, "utf-8");
 		console.log(`wrote ${rel}`);
 	}
+
+	writeConfig("skill", abs);
+	restampSkillFile(join(abs, "SKILL.md"), baseRepo());
 
 	console.log(`\n${files.length} file(s) written to ${abs}`);
 }
@@ -1112,5 +1177,5 @@ export function cmdSkill(args: string[]): void {
 		return;
 	}
 
-	throw new Error("Usage: folio skill install <path>");
+	throw new Error("Usage: folio skill install [path]");
 }

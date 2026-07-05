@@ -206,6 +206,8 @@ folio drop <topic> --force           delete a draft (and its remote branch, when
 folio web                            open the web review surface (needs a remote)
 folio config                         show config
 folio config <key> <value>           set config
+folio skill install <path>           write the embedded folio skill into <path>, remembering it
+folio skill install                  re-run against the remembered path
 ```
 
 ## Web
@@ -260,6 +262,10 @@ folio config web https://folio-web.bytebros.workers.dev
 git origin points at GitHub). `path` cannot be set here — location is a
 bind-time decision, so changing it means `folio bind`.
 
+`skill` holds the path where `folio skill install` last wrote the skill
+(see [Skill](#skill)) — set by `skill install`, not meant to be hand-edited
+here.
+
 Rebind to a different repo, GitHub or local:
 
 ```bash
@@ -269,6 +275,41 @@ folio bind <path> --force
 
 Rebinding drops the amendments for the previous binding. The managed clone
 may be re-cloned; a custom `path` directory is yours and is never deleted.
+
+## Skill
+
+`folio skill install <path>` unpacks the CLI's embedded copy of the folio
+skill into `<path>`, and records `<path>` under the `skill` config key.
+Once recorded, a bare re-run reuses it:
+
+```bash
+folio skill install ~/.claude/skills/folio   # first time — records the path
+folio skill install                          # later — reuses it
+```
+
+If a bound block's `INDEX.md` carries frontmatter with a `description` — the
+block's "scent," one authored sentence naming what it covers (SPEC.md §7) —
+install stamps it onto the written `SKILL.md`'s own frontmatter
+`description` as a trailing `Bound folio: <scent>` clause. Agent harnesses
+that keep a skill's description always-in-context then have a better chance
+of firing the skill on a topic mention, whatever block happens to be bound.
+No scent (unbound, or an `INDEX.md` without one) means no suffix.
+
+Stamping is idempotent — installing twice in a row produces byte-identical
+output — and re-stamping always replaces any prior `Bound folio: ...`
+clause rather than appending to it.
+
+`folio bind` re-stamps automatically after a successful bind, if a skill was
+previously installed and its `SKILL.md` still exists at the recorded path.
+`folio status` is a stateless drift check: if the installed description's
+scent no longer matches the bound block's live `INDEX.md`, it prints:
+
+```text
+Skill description out of date, run `folio skill install`
+```
+
+Silent when there's no `skill` config key, no installed `SKILL.md`, or the
+two already agree.
 
 ## Development
 
