@@ -16,7 +16,8 @@ export type ConfigKey =
 	| "web"
 	| "source"
 	| "path"
-	| "strategy";
+	| "strategy"
+	| "skill";
 
 /**
  * Read a config value, or the whole file when no key is given.

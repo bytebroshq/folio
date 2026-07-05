@@ -39,6 +39,11 @@ Start here to establish a strategy moving forward.
      ```bash
      curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
      ```
+2. Ground in the bound block: read its `INDEX.md` — the topic map — as soon
+   as this skill fires, not only once a leaf search begins. This skill's own
+   `description` may carry a "Bound folio: ..." scent stamped from that
+   INDEX's frontmatter; the live file, not the stamp, is ground truth for
+   what the block actually covers.
 
 ### Knowledge Search & Retrieval
 

@@ -2,7 +2,7 @@
 // package.json
 var package_default = {
   name: "@folio/cli",
-  version: "0.1.0",
+  version: "0.2.0",
   private: true,
   type: "module",
   bin: {
@@ -22,8 +22,8 @@ var package_default = {
 };
 
 // src/commands.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname, join as join3 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readdirSync as readdirSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { dirname, join as join4 } from "node:path";
 
 // ../core/src/lint/checks/description-sync.ts
 import { readFileSync as readFileSync2 } from "node:fs";
@@ -756,7 +756,7 @@ var skillBundle = {
 name: folio
 description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. Works with or without the folio CLI.
 metadata:
-  folio-cli-version: 0.1.0
+  folio-cli-version: 0.2.0
 ---
 
 # Folio skill
@@ -793,6 +793,11 @@ Start here to establish a strategy moving forward.
      \`\`\`bash
      curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
      \`\`\`
+2. Ground in the bound block: read its \`INDEX.md\` — the topic map — as soon
+   as this skill fires, not only once a leaf search begins. This skill's own
+   \`description\` may carry a "Bound folio: ..." scent stamped from that
+   INDEX's frontmatter; the live file, not the stamp, is ground truth for
+   what the block actually covers.
 
 ### Knowledge Search & Retrieval
 
@@ -1094,6 +1099,103 @@ and topical. For the full ritual — manual or CLI — see
 `
 };
 
+// src/skill-scent.ts
+import { existsSync as existsSync3, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+var SUFFIX_RE = /[ \t]*Bound folio:.*$/;
+var SUFFIX_CAPTURE_RE = /Bound folio:[ \t]*(.*)$/;
+function fieldLineRe(field) {
+  return new RegExp(`^${field}:[ \\t]*(.*)$`, "m");
+}
+function unquote(value) {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+function frontmatterRange(lines) {
+  if (lines[0]?.trim() !== "---")
+    return null;
+  for (let i = 1;i < lines.length; i++) {
+    if (lines[i]?.trim() === "---")
+      return { start: 1, end: i };
+  }
+  return null;
+}
+function frontmatterField(content, field) {
+  const lines = content.split(`
+`);
+  const range = frontmatterRange(lines);
+  if (!range)
+    return;
+  const re = fieldLineRe(field);
+  for (let i = range.start;i < range.end; i++) {
+    const match = lines[i].match(re);
+    if (match)
+      return unquote(match[1].trim());
+  }
+  return;
+}
+function readIndexDescription(repoRoot) {
+  const indexPath = join3(repoRoot, "INDEX.md");
+  if (!existsSync3(indexPath))
+    return null;
+  const value = frontmatterField(readFileSync5(indexPath, "utf-8"), "description");
+  return value && value.trim() !== "" ? value.trim() : null;
+}
+function stripScent(description) {
+  return description.replace(SUFFIX_RE, "").trimEnd();
+}
+function extractScent(description) {
+  const match = description.match(SUFFIX_CAPTURE_RE);
+  const scent = match?.[1]?.trim();
+  return scent && scent !== "" ? scent : null;
+}
+function stampScent(description, scent) {
+  const stock = stripScent(description);
+  return scent ? `${stock} Bound folio: ${scent}` : stock;
+}
+function readSkillDescription(skillPath) {
+  if (!existsSync3(skillPath))
+    return;
+  return frontmatterField(readFileSync5(skillPath, "utf-8"), "description");
+}
+function restampSkillFile(skillPath, repoRoot) {
+  if (!existsSync3(skillPath))
+    return;
+  const content = readFileSync5(skillPath, "utf-8");
+  const lines = content.split(`
+`);
+  const range = frontmatterRange(lines);
+  if (!range)
+    return;
+  const re = fieldLineRe("description");
+  let descLine = -1;
+  for (let i = range.start;i < range.end; i++) {
+    if (re.test(lines[i])) {
+      descLine = i;
+      break;
+    }
+  }
+  if (descLine === -1)
+    return;
+  const current = unquote(lines[descLine].replace(/^description:[ \t]*/, "").trim());
+  const scent = readIndexDescription(repoRoot);
+  const next = stampScent(current, scent);
+  if (next === current)
+    return;
+  lines[descLine] = `description: ${JSON.stringify(next)}`;
+  writeFileSync2(skillPath, lines.join(`
+`), "utf-8");
+}
+
 // src/commands.ts
 function tableRow(marker, topic, status, pr) {
   return `  ${marker}${topic.padEnd(35)} ${status.padEnd(7)} ${pr}`;
@@ -1110,7 +1212,7 @@ var REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
 function resolveBindTarget(target) {
   if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target))
     return "local";
-  return existsSync3(resolvePath(target)) ? "local" : "remote";
+  return existsSync4(resolvePath(target)) ? "local" : "remote";
 }
 function currentBinding() {
   return { remote: readConfig("remote"), path: getPath() };
@@ -1135,24 +1237,38 @@ function checkRebind(next, force) {
 }
 function detachCurrent() {
   const old = baseRepo();
-  if (existsSync3(AMEND_DIR)) {
+  if (existsSync4(AMEND_DIR)) {
     for (const entry of readdirSync2(AMEND_DIR)) {
       run(`rm -rf "${AMEND_DIR}/${entry}"`);
     }
   }
-  if (existsSync3(`${old}/.git`)) {
+  if (existsSync4(`${old}/.git`)) {
     run(`git -C "${old}" worktree prune 2>/dev/null || true`, { quiet: true });
   }
   clearActive();
+}
+function restampBoundSkill() {
+  const skillDir = readConfig("skill");
+  if (!skillDir)
+    return;
+  const skillPath = join4(skillDir, "SKILL.md");
+  if (!existsSync4(skillPath))
+    return;
+  try {
+    restampSkillFile(skillPath, baseRepo());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`  (couldn't refresh skill description: ${msg})`);
+  }
 }
 function bindLocal(path, force) {
   const abs = resolvePath(path);
   if (!checkRebind({ remote: null, path: abs }, force))
     return;
-  if (!existsSync3(abs)) {
+  if (!existsSync4(abs)) {
     throw new Error(`No such directory: ${abs}. Run 'folio create ${path}'?`);
   }
-  if (!existsSync3(`${abs}/.git`)) {
+  if (!existsSync4(`${abs}/.git`)) {
     throw new Error(`${abs} is not a git repository. Run 'git init -b main' there or 'folio create <path>'.`);
   }
   const hasMain = run(`git -C "${abs}" rev-parse --verify main 2>/dev/null`, {
@@ -1172,6 +1288,7 @@ function bindLocal(path, force) {
   if (origin) {
     console.log(`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`);
   }
+  restampBoundSkill();
 }
 function checkRemoteAccess(remote) {
   console.log(`Checking access to ${remote}...`);
@@ -1187,7 +1304,7 @@ function bindRemote(remote, force) {
     return;
   checkRemoteAccess(remote);
   ensureConfig();
-  if (existsSync3(`${BASE_REPO}/.git`)) {
+  if (existsSync4(`${BASE_REPO}/.git`)) {
     const existingUrl = run(`git -C "${BASE_REPO}" remote get-url origin 2>/dev/null || echo ""`, { quiet: true }).stdout;
     if (existingUrl !== `git@github.com:${remote}.git`) {
       console.log("Old clone points to a different remote. Re-cloning...");
@@ -1205,15 +1322,16 @@ function bindRemote(remote, force) {
   if (ff.stdout)
     console.log(`  ${ff.stdout}`);
   console.log(`✓ Bound to ${remote}.`);
+  restampBoundSkill();
 }
 function bindRemoteInto(remote, path, force) {
-  if (!REPO_SHAPE.test(remote) || existsSync3(resolvePath(remote))) {
+  if (!REPO_SHAPE.test(remote) || existsSync4(resolvePath(remote))) {
     throw new Error(`'${remote}' doesn't look like <owner/repo>. Usage: folio bind <owner/repo> <path>`);
   }
   const abs = resolvePath(path);
   if (!checkRebind({ remote, path: abs }, force))
     return;
-  if (existsSync3(abs) && readdirSync2(abs).length > 0) {
+  if (existsSync4(abs) && readdirSync2(abs).length > 0) {
     throw new Error(`${abs} already exists and is not empty.`);
   }
   checkRemoteAccess(remote);
@@ -1232,6 +1350,7 @@ function bindRemoteInto(remote, path, force) {
   writeConfig("strategy", "pr");
   writeConfig("source", "");
   console.log(`✓ Bound to ${remote} at ${abs}.`);
+  restampBoundSkill();
 }
 function cmdBind(args) {
   const positionals = args.filter((a) => !a.startsWith("--"));
@@ -1290,12 +1409,12 @@ function cmdCreate(args) {
   if (!target)
     throw new Error("Usage: folio create <path> [--force]");
   const abs = resolvePath(target);
-  if (existsSync3(abs) && readdirSync2(abs).length > 0) {
+  if (existsSync4(abs) && readdirSync2(abs).length > 0) {
     throw new Error(`${abs} already exists and is not empty.`);
   }
   mkdirSync2(abs, { recursive: true });
-  writeFileSync2(`${abs}/INDEX.md`, INDEX_SCAFFOLD, "utf-8");
-  writeFileSync2(`${abs}/SCHEMA.md`, SCHEMA_SCAFFOLD, "utf-8");
+  writeFileSync3(`${abs}/INDEX.md`, INDEX_SCAFFOLD, "utf-8");
+  writeFileSync3(`${abs}/SCHEMA.md`, SCHEMA_SCAFFOLD, "utf-8");
   const init = run(`git -C "${abs}" init -b main --quiet && git -C "${abs}" add -A && git -C "${abs}" commit -m "folio: scaffold INDEX and SCHEMA" --quiet`);
   if (init.exitCode !== 0) {
     throw new Error(`git init failed in ${abs}: ${init.stderr}`);
@@ -1577,6 +1696,20 @@ function cmdDrop(args) {
     console.log("  (active cleared — on main now)");
   }
 }
+function printSkillDrift() {
+  const skillDir = readConfig("skill");
+  if (!skillDir)
+    return;
+  const skillPath = join4(skillDir, "SKILL.md");
+  const current = readSkillDescription(skillPath);
+  if (current === undefined)
+    return;
+  const installedScent = extractScent(current);
+  const liveScent = readIndexDescription(baseRepo());
+  if (installedScent === liveScent)
+    return;
+  console.log("Skill description out of date, run `folio skill install`");
+}
 function cmdStatus(args = []) {
   ensureConfig();
   const remote = readConfig("remote");
@@ -1585,6 +1718,7 @@ function cmdStatus(args = []) {
     console.log("No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.");
     return;
   }
+  printSkillDrift();
   const local = getStrategy() === "merge";
   const extended = args.includes("-x") || args.includes("--extended") || args.includes("-f") || args.includes("--full");
   const update = args.includes("-u") || args.includes("--update");
@@ -1776,7 +1910,7 @@ function cmdLint(args) {
   }
   const active = getActive();
   let storeDir;
-  if (active && existsSync3(`${AMEND_DIR}/${active}`)) {
+  if (active && existsSync4(`${AMEND_DIR}/${active}`)) {
     storeDir = `${AMEND_DIR}/${active}`;
   } else if (mainExists()) {
     storeDir = baseRepo();
@@ -1794,17 +1928,21 @@ function cmdLint(args) {
   }
 }
 function skillInstall(target) {
-  if (!target) {
-    throw new Error("Usage: folio skill install <path>");
+  const recorded = readConfig("skill");
+  const resolvedTarget = target ?? recorded;
+  if (!resolvedTarget) {
+    throw new Error("Usage: folio skill install <path> (no path recorded yet — pass one the first time)");
   }
-  const abs = resolvePath(target);
+  const abs = resolvePath(resolvedTarget);
   const files = Object.keys(skillBundle).sort();
   for (const rel of files) {
-    const dest = join3(abs, rel);
+    const dest = join4(abs, rel);
     mkdirSync2(dirname(dest), { recursive: true });
-    writeFileSync2(dest, skillBundle[rel], "utf-8");
+    writeFileSync3(dest, skillBundle[rel], "utf-8");
     console.log(`wrote ${rel}`);
   }
+  writeConfig("skill", abs);
+  restampSkillFile(join4(abs, "SKILL.md"), baseRepo());
   console.log(`
 ${files.length} file(s) written to ${abs}`);
 }
@@ -1814,7 +1952,7 @@ function cmdSkill(args) {
     skillInstall(rest[0]);
     return;
   }
-  throw new Error("Usage: folio skill install <path>");
+  throw new Error("Usage: folio skill install [path]");
 }
 
 // src/index.ts
@@ -1847,7 +1985,7 @@ Usage:
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
-  folio skill install <path>       Write the embedded folio skill into <path>
+  folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft → edit → save → proof → publish.

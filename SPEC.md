@@ -303,6 +303,14 @@ Every leaf MUST appear in `INDEX.md`.
 
 Index entries use the same bracket links throughout a folio.
 
+`INDEX.md` MAY carry its own frontmatter (§4.1). When present, its
+`description` names the block itself — one sentence describing what the
+block covers, as distinct from a leaf's `description`, which describes that
+leaf. Tooling MAY use this field for previews, listings, or to advertise a
+block's coverage to other tooling (e.g. stamping it into an installed
+agent skill's own description). A folio without this field simply forgoes
+that use; nothing else in this specification depends on it.
+
 ---
 
 ## 8. Schema

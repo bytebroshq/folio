@@ -52,7 +52,7 @@ Usage:
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
-  folio skill install <path>       Write the embedded folio skill into <path>
+  folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft → edit → save → proof → publish.
