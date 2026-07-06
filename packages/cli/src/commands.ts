@@ -465,6 +465,10 @@ export function cmdDraft(args: string[]): void {
 
 	console.log(`✓ Draft '${slug}' created.`);
 	console.log(`  store: ${path}/`);
+	console.log(`  next:  edit leaves in the store, then`);
+	console.log(
+		`         folio save ${topic} -m "..." && folio proof ${topic}`,
+	);
 }
 
 // ── shared draft helpers ─────────────────────────────────────────────

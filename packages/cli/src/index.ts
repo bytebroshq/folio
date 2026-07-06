@@ -64,6 +64,8 @@ $FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
 passing the topic explicitly. Chain steps with && (e.g. folio save my-topic
 -m "..." && folio proof my-topic) — verbs stay single-purpose.
+
+Tip: verbs chain — folio draft t && ... && folio save t -m "..." && folio proof t
 `);
 	process.exit(0);
 }
