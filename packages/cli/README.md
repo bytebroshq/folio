@@ -118,19 +118,31 @@ Edit files here:
 ~/.config/folio/stores/amendments/my-topic/
 ```
 
+Every draft verb — `save`, `proof`, `publish`, `drop`, `lint` — takes the
+topic explicitly. This is what makes concurrent drafts safe: each process
+names its own draft, so one agent's `save` can never land in another
+agent's worktree. Resolution order is: explicit argument, then
+`$FOLIO_DRAFT`, then an error. Set `FOLIO_DRAFT` once in a script or hook
+that wraps the whole ritual in a single process; interactive agents should
+keep passing the topic explicitly — env doesn't survive between tool
+calls, and the topic in the command self-documents the transcript.
+
 Check state:
 
 ```bash
 folio status
 folio status -u  # fetch and fast-forward main when an update is needed
-folio status -x  # include draft PR context when relevant
 ```
 
-`status` is concise and action-oriented:
+`status` is the fleet dashboard · one line per open draft, plus main's
+own state:
 
 ```text
-No drafts
 Up to date
+
+Drafts:
+  my-draft                       dirty
+  another-draft                  proofed · PR #42 ready
 
 Bound to owner/repo · ~/.config/folio/stores/.main
 ```
@@ -138,42 +150,33 @@ Bound to owner/repo · ~/.config/folio/stores/.main
 When the bound source has moved:
 
 ```text
-No drafts
 Needs update, run `folio status -u`
+No drafts
 
 Bound to owner/repo · ~/.config/folio/stores/.main
-```
-
-While drafting:
-
-```text
-On draft my-draft
-Pending save, run `folio save`
-
-Bound to owner/repo · ~/.config/folio/stores/amendments/my-draft
 ```
 
 An in-place binding collapses repeated paths:
 
 ```text
-No drafts
 Up to date
+No drafts
 
 Bound to /path/to/local-folio
 ```
 
 Save, then proof — lints, rebases, and (pr strategy) pushes + opens or
-updates the draft PR; under merge strategy it shows the diff vs main:
+updates the draft PR; under merge strategy it shows the diff vs main.
+Chain them with `&&`, naming the topic once:
 
 ```bash
-folio save -m "describe the change"
-folio proof
+folio save my-topic -m "describe the change" && folio proof my-topic
 ```
 
 Publish — merges into main (pr strategy: only once the PR is marked ready):
 
 ```bash
-folio publish
+folio publish my-topic
 ```
 
 List drafts:
@@ -197,15 +200,16 @@ folio bind <path>                    bind in place to a local git repo
 folio bind ... --remote|--local      force how an ambiguous target is read
 folio create <path>                  scaffold a new folio and bind to it
 folio draft <topic>                  start or resume a draft (--force to restart)
-folio save [-m "message"]            save changes in the active draft
-folio proof                          lint + rebase; push + draft PR (pr) or show diff (merge)
-folio publish                        merge the draft into main (pr: only once PR is ready)
-folio status [-u] [-x]               show current state; -u updates, -x includes PR context
+folio save <topic> [-m "message"]    save changes in a draft
+folio proof <topic>                  lint + rebase; push + draft PR (pr) or show diff (merge)
+folio publish <topic>                merge the draft into main (pr: only once PR is ready)
+folio status [-u]                    fleet dashboard: every draft's state; -u fast-forwards main
 folio list                           list drafts
 folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
 folio web                            open the web review surface (needs a remote)
 folio config                         show config
 folio config <key> <value>           set config
+folio lint [<topic>]                 check folio integrity (a draft, or main if omitted)
 folio skill install <path>           write the embedded folio skill into <path>, remembering it
 folio skill install                  re-run against the remembered path
 ```
@@ -243,7 +247,6 @@ Fresh config starts clean:
 ```yaml
 remote:
 store: git
-active:
 ```
 
 Binding sets the three binding keys — `remote` (owner/repo, when

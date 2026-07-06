@@ -182,25 +182,35 @@ export function worktreeExists(path: string): boolean {
 
 /**
  * Batch-fetch open PRs for a set of branch names.
- * Returns a Map<headRefName, PR number> — one gh call instead of N.
+ * Returns a Map<headRefName, {number, isDraft}> — one gh call instead of N.
  */
-function batchPRs(remote: string): Map<string, string> {
-	const map = new Map<string, string>();
+function batchPRs(
+	remote: string,
+): Map<string, { number: string; isDraft: boolean }> {
+	const map = new Map<string, { number: string; isDraft: boolean }>();
 
-	// List all open PRs and match client-side.  "@" is used as separator
-	// because it cannot appear in Git branch names or PR numbers.
+	// List all open PRs and match client-side. "@" is used as separator
+	// because it cannot appear in Git branch names or PR numbers/booleans.
 	const result = gh(
-		`pr list --state open --json number,headRefName --jq '.[] | .headRefName + "@" + (.number|tostring)'`,
+		`pr list --state open --json number,headRefName,isDraft --jq '.[] | .headRefName + "@" + (.number|tostring) + "@" + (.isDraft|tostring)'`,
 		remote,
 	);
 	if (!result.stdout) return map;
 
 	for (const line of result.stdout.split("\n")) {
-		const sep = line.lastIndexOf("@");
-		if (sep === -1) continue;
-		const branch = line.slice(0, sep);
-		const num = line.slice(sep + 1);
-		if (branch && num) map.set(branch, num);
+		const draftSep = line.lastIndexOf("@");
+		if (draftSep === -1) continue;
+		const isDraftStr = line.slice(draftSep + 1);
+		const head = line.slice(0, draftSep);
+
+		const numSep = head.lastIndexOf("@");
+		if (numSep === -1) continue;
+		const branch = head.slice(0, numSep);
+		const num = head.slice(numSep + 1);
+
+		if (branch && num) {
+			map.set(branch, { number: num, isDraft: isDraftStr === "true" });
+		}
 	}
 	return map;
 }
@@ -209,8 +219,16 @@ export function listAmendments(): {
 	topic: string;
 	status: string;
 	pr?: string;
+	prNumber?: string;
+	prDraft?: boolean;
 }[] {
-	const results: { topic: string; status: string; pr?: string }[] = [];
+	const results: {
+		topic: string;
+		status: string;
+		pr?: string;
+		prNumber?: string;
+		prDraft?: boolean;
+	}[] = [];
 	const { exitCode } = run(`ls "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
 	if (exitCode !== 0) return results;
 
@@ -233,7 +251,9 @@ export function listAmendments(): {
 		topics.push(topic);
 	}
 
-	const prMap = remote ? batchPRs(remote) : new Map<string, string>();
+	const prMap = remote
+		? batchPRs(remote)
+		: new Map<string, { number: string; isDraft: boolean }>();
 
 	for (const topic of topics) {
 		const path = `${AMEND_DIR}/${topic}`;
@@ -241,13 +261,19 @@ export function listAmendments(): {
 		const status = dirty ? "dirty" : "clean";
 
 		let pr: string | undefined;
+		let prNumber: string | undefined;
+		let prDraft: boolean | undefined;
 		const branch = topicBranches.get(topic);
 		if (branch) {
-			const prNum = prMap.get(branch);
-			if (prNum) pr = `PR #${prNum}`;
+			const info = prMap.get(branch);
+			if (info) {
+				pr = `PR #${info.number}`;
+				prNumber = info.number;
+				prDraft = info.isDraft;
+			}
 		}
 
-		results.push({ topic, status, pr });
+		results.push({ topic, status, pr, prNumber, prDraft });
 	}
 
 	return results;
