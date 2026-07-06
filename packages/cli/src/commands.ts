@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
@@ -7,16 +13,14 @@ import {
 	BASE_REPO,
 	baseRepo,
 	type ConfigKey,
-	clearActive,
 	ensureConfig,
-	getActive,
 	getPath,
 	getRemote,
 	getStrategy,
 	hasRemote,
 	readConfig,
 	resolvePath,
-	setActive,
+	STORE_DIR,
 	topicToSlug,
 	writeConfig,
 } from "./config";
@@ -108,9 +112,9 @@ function checkRebind(next: Binding, force: boolean): boolean {
 }
 
 /**
- * Detach from the current binding: drop amendment worktrees and active
- * state. Never touches the bound directory itself — a custom path is the
- * user's checkout; only the managed clone is folio-owned.
+ * Detach from the current binding: drop amendment worktrees. Never touches
+ * the bound directory itself — a custom path is the user's checkout; only
+ * the managed clone is folio-owned.
  */
 function detachCurrent(): void {
 	const old = baseRepo();
@@ -122,7 +126,6 @@ function detachCurrent(): void {
 	if (existsSync(`${old}/.git`)) {
 		run(`git -C "${old}" worktree prune 2>/dev/null || true`, { quiet: true });
 	}
-	clearActive();
 }
 
 /**
@@ -386,6 +389,7 @@ export function cmdCreate(args: string[]): void {
 export function cmdDraft(args: string[]): void {
 	ensureConfig();
 	ensureBase();
+	if (hasRemote()) fetchMain();
 
 	let force = false;
 	let topic = "";
@@ -437,7 +441,6 @@ export function cmdDraft(args: string[]): void {
 			if (hasRemote()) {
 				run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
 			}
-			setActive(slug);
 			console.log(`✓ Resumed draft '${slug}'.`);
 			return;
 		}
@@ -448,15 +451,9 @@ export function cmdDraft(args: string[]): void {
 		throw new Error(`draft '${slug}' already exists. Drop it first.`);
 	}
 
-	// Ensure main is fresh
-	ensureBase();
-	if (hasRemote()) {
-		run(`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null || true`);
-		run(
-			`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null || true`,
-		);
-	}
-
+	// Worktree add from a fetched remote-tracking ref (or the local main
+	// branch with no remote) — never checkout/pull the shared base repo
+	// itself, which other concurrent drafts may be mid-operation on.
 	const branch = `amend/${slug}`;
 	console.log(`Creating draft worktree for '${slug}'...`);
 	const wt = run(
@@ -466,27 +463,81 @@ export function cmdDraft(args: string[]): void {
 		throw new Error(`Failed to create worktree for '${slug}'.`);
 	}
 
-	setActive(slug);
 	console.log(`✓ Draft '${slug}' created.`);
 	console.log(`  store: ${path}/`);
 }
 
 // ── shared draft helpers ─────────────────────────────────────────────
 
-function requireActiveDraft(verb: string): { active: string; path: string } {
-	const active = getActive();
-	if (!active) {
+/** Usage examples shown in resolveDraft's "no topic" error, per verb. */
+const VERB_EXAMPLES: Record<string, string> = {
+	save: `folio save <topic> -m "..."`,
+	proof: "folio proof <topic>",
+	publish: "folio publish <topic>",
+	drop: "folio drop <topic> --force",
+};
+
+/**
+ * Split a leading topic positional out of an arg list, skipping any
+ * recognized `flag value` pairs so a flag's value (e.g. the message text
+ * after `-m`, or the spec name after `--spec`) is never mistaken for the
+ * topic. Everything not consumed as the topic is returned as `rest`, in
+ * original order, for the caller's own flag parsing.
+ */
+function extractTopic(
+	args: string[],
+	valueFlags: string[] = [],
+): { topic?: string; rest: string[] } {
+	const rest: string[] = [];
+	let topic: string | undefined;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i] as string;
+		if (valueFlags.includes(arg)) {
+			rest.push(arg);
+			if (i + 1 < args.length) {
+				rest.push(args[++i] as string);
+			}
+			continue;
+		}
+		if (topic === undefined && !arg.startsWith("-")) {
+			topic = arg;
+			continue;
+		}
+		rest.push(arg);
+	}
+
+	return { topic, rest };
+}
+
+/**
+ * Resolve the draft a verb operates on: explicit topic argument first, then
+ * $FOLIO_DRAFT, then a teaching error. This is the multiplayer-safe
+ * replacement for the old shared `active` config pointer — both args and
+ * env live at the process boundary, so concurrent agents never collide.
+ */
+function resolveDraft(
+	verb: string,
+	args: string[],
+	valueFlags: string[] = [],
+): { slug: string; path: string; rest: string[] } {
+	const { topic: explicit, rest } = extractTopic(args, valueFlags);
+	const topic = explicit ?? process.env.FOLIO_DRAFT;
+	if (!topic) {
+		const example = VERB_EXAMPLES[verb] ?? `folio ${verb} <topic>`;
 		throw new Error(
-			`No active draft. Run 'folio draft <topic>' before '${verb}'.`,
+			`No draft specified. Pass a topic ('${example}') or set FOLIO_DRAFT.`,
 		);
 	}
-	const path = amendmentPath(active);
+
+	const slug = topicToSlug(topic);
+	const path = amendmentPath(slug);
 	if (!worktreeExists(path)) {
 		throw new Error(
-			`Worktree for '${active}' not found. Run 'folio draft ${active}'.`,
+			`Worktree for '${slug}' not found. Run 'folio draft ${topic}'.`,
 		);
 	}
-	return { active, path };
+	return { slug, path, rest };
 }
 
 function draftHasChanges(path: string): boolean {
@@ -512,20 +563,78 @@ function findOpenPR(remote: string, branch: string): string {
 	return prNum && prNum !== "null" ? prNum : "";
 }
 
+// ── main-repo lock ───────────────────────────────────────────────────
+//
+// A coarse mutual-exclusion around the few ops that still mutate the
+// shared `.main` base repo in place — status -u's fast-forward and
+// merge-strategy publish. mkdir is atomic across processes, so it doubles
+// as the lock primitive; a lock older than the staleness timeout is
+// assumed abandoned (crashed process) and reclaimed. No daemon, no queue —
+// just enough to keep two concurrent fast-forwards from racing.
+
+const LOCK_PATH = `${STORE_DIR}/.lock`;
+const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 5_000;
+
+function lockAgeMs(): number | null {
+	try {
+		return Date.now() - statSync(LOCK_PATH).mtimeMs;
+	} catch {
+		return null;
+	}
+}
+
+function acquireMainLock(): void {
+	const deadline = Date.now() + LOCK_WAIT_MS;
+	for (;;) {
+		try {
+			mkdirSync(LOCK_PATH);
+			return;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+
+			const age = lockAgeMs();
+			if (age === null || age > LOCK_STALE_MS) {
+				run(`rm -rf "${LOCK_PATH}"`, { quiet: true });
+				continue;
+			}
+			if (Date.now() > deadline) {
+				throw new Error(
+					"Another folio process is updating the shared repo. Try again shortly.",
+				);
+			}
+			run("sleep 0.2", { quiet: true });
+		}
+	}
+}
+
+function releaseMainLock(): void {
+	run(`rm -rf "${LOCK_PATH}"`, { quiet: true });
+}
+
+function withMainLock<T>(fn: () => T): T {
+	acquireMainLock();
+	try {
+		return fn();
+	} finally {
+		releaseMainLock();
+	}
+}
+
 // ── save ───────────────────────────────────────────────────────────
 
 export function cmdSave(args: string[]): void {
 	ensureConfig();
-	const { active, path } = requireActiveDraft("save");
+	const { slug, path, rest } = resolveDraft("save", args, ["-m"]);
 
-	let msg = `amend: ${active}`;
-	const mIdx = args.indexOf("-m");
-	if (mIdx >= 0 && mIdx + 1 < args.length) {
-		msg = args[mIdx + 1];
+	let msg = `amend: ${slug}`;
+	const mIdx = rest.indexOf("-m");
+	if (mIdx >= 0 && mIdx + 1 < rest.length) {
+		msg = rest[mIdx + 1] as string;
 	}
 
 	if (!draftHasChanges(path)) {
-		console.log(`Nothing to save in '${active}'.`);
+		console.log(`Nothing to save in '${slug}'.`);
 		return;
 	}
 
@@ -547,10 +656,10 @@ export function cmdProof(args: string[]): void {
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { active, path } = requireActiveDraft("proof");
+	const { slug, path } = resolveDraft("proof", args);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
-		throw new Error(`Draft '${active}' is not on a branch.`);
+		throw new Error(`Draft '${slug}' is not on a branch.`);
 	}
 
 	// Auto-save so proof always reviews the latest edits.
@@ -563,7 +672,7 @@ export function cmdProof(args: string[]): void {
 	printLintResult(lintResult);
 	if (hasLintErrors(lintResult)) {
 		throw new Error(
-			`Lint found issues in '${active}'. Fix them, 'folio save', then re-run 'folio proof'.`,
+			`Lint found issues in '${slug}'. Fix them, 'folio save ${slug}', then re-run 'folio proof ${slug}'.`,
 		);
 	}
 
@@ -573,7 +682,7 @@ export function cmdProof(args: string[]): void {
 	);
 	if (rebase.exitCode !== 0) {
 		throw new Error(
-			`REBASE CONFLICT in ${active} — resolve in ${path}/ then re-run 'folio proof'.`,
+			`REBASE CONFLICT in ${slug} — resolve in ${path}/ then re-run 'folio proof ${slug}'.`,
 		);
 	}
 
@@ -582,9 +691,9 @@ export function cmdProof(args: string[]): void {
 			`git -C "${path}" diff ${mainRef()}...HEAD --stat 2>/dev/null`,
 			{ quiet: true },
 		).stdout;
-		console.log(`✓ Proofed '${active}' — changes vs main:`);
+		console.log(`✓ Proofed '${slug}' — changes vs main:`);
 		console.log(diffStat || "  (no changes)");
-		console.log("Run 'folio publish' when ready.");
+		console.log(`Run 'folio publish ${slug}' when ready.`);
 		return;
 	}
 
@@ -600,7 +709,7 @@ export function cmdProof(args: string[]): void {
 	const msg = run(`git -C "${path}" log -1 --format=%B`, {
 		quiet: true,
 	}).stdout;
-	const title = (msg.split("\n")[0] || `amend: ${active}`).replace(/"/g, '\\"');
+	const title = (msg.split("\n")[0] || `amend: ${slug}`).replace(/"/g, '\\"');
 
 	if (!prNum) {
 		const prResult = run(
@@ -611,66 +720,67 @@ export function cmdProof(args: string[]): void {
 			throw new Error(`PR creation failed: ${prResult.stderr}`);
 		}
 		const newPrNum = prResult.stdout.match(/(\d+)$/)?.[0] || "?";
-		console.log(`✓ Proofed '${active}' — draft PR #${newPrNum} opened`);
+		console.log(`✓ Proofed '${slug}' — draft PR #${newPrNum} opened`);
 		console.log(`  https://github.com/${remote}/pull/${newPrNum}`);
 	} else {
 		run(
 			`gh pr edit --repo "${remote}" ${prNum} --title "${title}" --body "${msg.replace(/"/g, '\\"')}" 2>/dev/null || true`,
 			{ quiet: true },
 		);
-		console.log(`✓ Proofed '${active}' — draft PR #${prNum} updated`);
+		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);
 		console.log(`  https://github.com/${remote}/pull/${prNum}`);
 	}
 	console.log(
-		"  Review on GitHub and mark it ready, then run 'folio publish'.",
+		`  Review on GitHub and mark it ready, then run 'folio publish ${slug}'.`,
 	);
 }
 
 // ── publish ────────────────────────────────────────────────────────
 
-function cleanupDraft(active: string, path: string, branch: string): void {
+function cleanupDraft(slug: string, path: string, branch: string): void {
 	run(
 		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
 	);
 	run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
-	clearActive();
-	console.log(`  Draft '${active}' closed.`);
+	console.log(`  Draft '${slug}' closed.`);
 }
 
-export function cmdPublish(_args: string[]): void {
+export function cmdPublish(args: string[]): void {
 	ensureConfig();
 	const local = getStrategy() === "merge";
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { active, path } = requireActiveDraft("publish");
+	const { slug, path } = resolveDraft("publish", args);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
-		throw new Error(`Draft '${active}' is not on a branch.`);
+		throw new Error(`Draft '${slug}' is not on a branch.`);
 	}
 
 	if (draftHasChanges(path)) {
 		throw new Error(
-			`Draft '${active}' has unsaved changes. Run 'folio save' then 'folio proof' first.`,
+			`Draft '${slug}' has unsaved changes. Run 'folio save ${slug}' then 'folio proof ${slug}' first.`,
 		);
 	}
 
 	if (local) {
-		const merge = run(
-			`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`,
+		// Merge-strategy publish mutates the shared base repo's main branch —
+		// serialize with status -u under the coarse lock.
+		const merge = withMainLock(() =>
+			run(`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`),
 		);
 		if (merge.exitCode !== 0) {
 			throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
 		}
-		console.log(`✓ Published '${active}' into main.`);
-		cleanupDraft(active, path, branch);
+		console.log(`✓ Published '${slug}' into main.`);
+		cleanupDraft(slug, path, branch);
 		return;
 	}
 
 	const prNum = findOpenPR(remote, branch);
 	if (!prNum) {
 		throw new Error(
-			`No open PR for '${active}'. Run 'folio proof' first to send it for review.`,
+			`No open PR for '${slug}'. Run 'folio proof ${slug}' first to send it for review.`,
 		);
 	}
 
@@ -680,7 +790,7 @@ export function cmdPublish(_args: string[]): void {
 	).stdout;
 	if (isDraft === "true") {
 		console.log(
-			`PR #${prNum} is still a draft — review it on GitHub and mark it ready, then run 'folio publish'.`,
+			`PR #${prNum} is still a draft — review it on GitHub and mark it ready, then run 'folio publish ${slug}'.`,
 		);
 		return;
 	}
@@ -691,12 +801,15 @@ export function cmdPublish(_args: string[]): void {
 	if (merge.exitCode !== 0) {
 		throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
 	}
-	console.log(`✓ Published '${active}' — PR #${prNum} merged.`);
+	console.log(`✓ Published '${slug}' — PR #${prNum} merged.`);
 
 	// Under pr strategy main follows origin — fast-forward the checkout.
-	const ff = run(
-		`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`,
-		{ quiet: true },
+	// This mutates the shared base repo, same as status -u — under the lock.
+	const ff = withMainLock(() =>
+		run(
+			`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`,
+			{ quiet: true },
+		),
 	);
 	if (ff.exitCode !== 0) {
 		console.log(
@@ -704,21 +817,21 @@ export function cmdPublish(_args: string[]): void {
 		);
 	}
 
-	cleanupDraft(active, path, branch);
+	cleanupDraft(slug, path, branch);
 }
 
 // ── drop ───────────────────────────────────────────────────────────
 
 export function cmdDrop(args: string[]): void {
-	let topic = "";
-	let force = false;
+	const { topic: explicit, rest } = extractTopic(args);
+	const force = rest.includes("--force");
+	const topic = explicit ?? process.env.FOLIO_DRAFT;
 
-	for (const arg of args) {
-		if (arg === "--force") force = true;
-		else topic = arg;
+	if (!topic) {
+		throw new Error(
+			`No draft specified. Pass a topic ('${VERB_EXAMPLES.drop}') or set FOLIO_DRAFT.`,
+		);
 	}
-
-	if (!topic) throw new Error("Usage: folio drop <topic> [--force]");
 
 	const slug = topicToSlug(topic);
 	const path = amendmentPath(slug);
@@ -796,13 +909,6 @@ export function cmdDrop(args: string[]): void {
 		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
 	}
 	console.log(`✓ Dropped amendment '${slug}'.`);
-
-	// Clear active if this was active
-	const active = getActive();
-	if (active === slug) {
-		clearActive();
-		console.log("  (active cleared — on main now)");
-	}
 }
 
 // ── status ─────────────────────────────────────────────────────────
@@ -828,6 +934,27 @@ function printSkillDrift(): void {
 	console.log("Skill description out of date, run `folio skill install`");
 }
 
+/**
+ * A draft's one-line dashboard state: dirty (uncommitted changes), saved
+ * (committed, no open PR yet — or no remote at all), or proofed (an open
+ * PR exists, draft or ready). Degrades gracefully with no remote or a
+ * failed gh lookup: `pr`/`prDraft` are simply absent, so it reads "saved".
+ */
+function draftState(d: {
+	status: string;
+	prNumber?: string;
+	prDraft?: boolean;
+}): string {
+	if (d.status === "dirty") return "dirty";
+	if (d.prNumber) {
+		return d.prDraft
+			? `proofed · PR #${d.prNumber} draft`
+			: `proofed · PR #${d.prNumber} ready`;
+	}
+	return "saved";
+}
+
+/** `folio status` is the fleet dashboard: one line per open draft. */
 export function cmdStatus(args: string[] = []): void {
 	ensureConfig();
 
@@ -842,129 +969,72 @@ export function cmdStatus(args: string[] = []): void {
 
 	printSkillDrift();
 
-	const local = getStrategy() === "merge";
-	const extended =
-		args.includes("-x") ||
-		args.includes("--extended") ||
-		args.includes("-f") ||
-		args.includes("--full");
 	const update = args.includes("-u") || args.includes("--update");
 	const bound = boundPath ?? (remote as string);
+	const base = baseRepo();
 
 	let fetchFailed = false;
 	if (hasRemote()) {
-		const before = run(
-			`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`,
-			{ quiet: true },
-		).stdout;
+		const before = run(`git -C "${base}" rev-parse origin/main 2>/dev/null`, {
+			quiet: true,
+		}).stdout;
 		fetchMain();
-		const after = run(
-			`git -C "${baseRepo()}" rev-parse origin/main 2>/dev/null`,
-			{ quiet: true },
-		).stdout;
+		const after = run(`git -C "${base}" rev-parse origin/main 2>/dev/null`, {
+			quiet: true,
+		}).stdout;
 		fetchFailed = before === "" && after === "";
 	}
 	const staleNote = fetchFailed
 		? " (couldn't reach remote — showing cached state)"
 		: "";
 
-	const active = getActive();
-
-	if (!active) {
-		const path = baseRepo();
-		console.log("No drafts");
-
-		const dirty =
-			run(`git -C "${path}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, {
-				quiet: true,
-			}).stdout !== "" ||
-			run(
-				`git -C "${path}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
-				{ quiet: true },
-			).stdout !== "";
-
-		if (dirty) {
-			console.log("Main has unsaved changes");
-		} else {
-			const behind = mainExists() ? behindCount() : 0;
-			if (behind > 0) {
-				if (update) {
-					const pull = run(
-						`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>&1`,
-					);
-					if (pull.exitCode !== 0) {
-						throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
-					}
-					console.log("Up to date");
-				} else {
-					console.log(`Needs update, run \`folio status -u\`${staleNote}`);
-				}
-			} else {
-				console.log(`Up to date${staleNote}`);
-			}
-		}
-
-		printStatusFooter(bound, path);
-
-		if (extended) {
-			const others = listAmendments();
-			if (others.length > 0) {
-				console.log("");
-				console.log("Drafts:");
-				for (const a of others) {
-					console.log(`  ${a.topic} (${a.status})${a.pr ? ` — ${a.pr}` : ""}`);
-				}
-			}
-		}
-		return;
-	}
-
-	const path = amendmentPath(active);
-	if (!worktreeExists(path)) {
-		console.log(`On draft ${active}`);
-		console.log(`Worktree missing, run \`folio draft ${active}\``);
-		printStatusFooter(bound, path);
-		return;
-	}
-
-	const branch = amendmentBranch(path);
-	const hasCommits =
-		run(`git -C "${path}" rev-list --count ${mainRef()}..HEAD 2>/dev/null`, {
+	// Main's own state: dirty, behind, or up to date.
+	const mainDirty =
+		run(`git -C "${base}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, {
 			quiet: true,
-		}).stdout !== "0";
+		}).stdout !== "" ||
+		run(
+			`git -C "${base}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
+			{ quiet: true },
+		).stdout !== "";
 
-	console.log(`On draft ${active}`);
-	if (isDirty(path)) {
-		console.log("Pending save, run `folio save`");
-	} else if (!hasCommits) {
-		console.log("No changes yet");
-	} else if (extended && !local && branch && branch !== "?") {
-		const prNum = findOpenPR(remote as string, branch);
-		if (!prNum) {
-			console.log("Saved, run `folio proof`");
-		} else {
-			const isDraftPR = gh(
-				`pr view ${prNum} --json isDraft --jq .isDraft`,
-				remote as string,
-			).stdout;
-			if (isDraftPR === "true") {
-				console.log(`Proofed, PR #${prNum} draft`);
-			} else {
-				console.log(`PR #${prNum} ready, run \`folio publish\``);
-			}
-		}
+	if (mainDirty) {
+		console.log("Main has unsaved changes");
 	} else {
-		console.log("Saved, run `folio proof`");
-	}
-
-	if (mainExists()) {
-		const behind = behindCount();
+		const behind = mainExists() ? behindCount() : 0;
 		if (behind > 0) {
-			console.log(`Main moved; proof will rebase (behind by ${behind})`);
+			if (update) {
+				// status -u fast-forwards the shared base repo — the same
+				// mutation publish (merge strategy) performs, so it takes the
+				// same lock.
+				const pull = withMainLock(() =>
+					run(`git -C "${base}" pull --ff-only origin main --quiet 2>&1`),
+				);
+				if (pull.exitCode !== 0) {
+					throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
+				}
+				console.log("Up to date");
+			} else {
+				console.log(`Needs update, run \`folio status -u\`${staleNote}`);
+			}
+		} else {
+			console.log(`Up to date${staleNote}`);
 		}
 	}
 
-	printStatusFooter(bound, path);
+	// Fleet dashboard — every open draft worktree under stores/amendments/.
+	const drafts = listAmendments();
+	if (drafts.length === 0) {
+		console.log("No drafts");
+	} else {
+		console.log("");
+		console.log("Drafts:");
+		for (const d of drafts) {
+			console.log(`  ${d.topic.padEnd(30)} ${draftState(d)}`);
+		}
+	}
+
+	printStatusFooter(bound, base);
 }
 
 // ── config command ────────────────────────────────────────────────
@@ -982,14 +1052,12 @@ export function cmdConfig(args: string[]): void {
 		const strategy = getStrategy();
 		const store = readConfig("store") || "(not set)";
 		const web = readConfig("web") || "(not set)";
-		const active = readConfig("active") || "(not set)";
 		const bound = readConfig("remote") || getPath();
 		console.log(`remote: ${remote}`);
 		console.log(`path: ${path}`);
 		console.log(`strategy: ${strategy}`);
 		console.log(`store: ${store}`);
 		console.log(`web: ${web}`);
-		console.log(`active: ${active}`);
 		// Resolved paths (computed, not stored)
 		console.log(`resolved: ${bound ? baseRepo() : "(not bound)"}`);
 		console.log(`amendments: ${AMEND_DIR}`);
@@ -1081,7 +1149,6 @@ export function cmdList(): void {
 	ensureConfig();
 	if (mainExists()) ensureBase();
 
-	const active = getActive();
 	const amendments = listAmendments();
 
 	console.log(tableRow("", "AMENDMENT", "STATUS", "PR"));
@@ -1091,29 +1158,44 @@ export function cmdList(): void {
 	}
 
 	for (const a of amendments) {
-		const marker = a.topic === active ? "*" : " ";
-		console.log(tableRow(marker, a.topic, a.status, a.pr || ""));
+		console.log(tableRow("", a.topic, a.status, a.pr || ""));
 	}
 }
 
 // ── lint ───────────────────────────────────────────────────────────
 
+/**
+ * lint's target resolves the same way a draft verb's does — explicit topic
+ * argument, then $FOLIO_DRAFT — but falls back to main instead of erroring
+ * when neither is set, since "lint what's bound" is a meaningful default
+ * (unlike save/proof/publish, which are meaningless without a draft).
+ */
 export function cmdLint(args: string[]): void {
 	ensureConfig();
 
-	const json = args.includes("--json");
-	const strict = args.includes("--strict");
-	const specIdx = args.indexOf("--spec");
-	const spec = specIdx >= 0 ? args[specIdx + 1] : "folio";
+	const { topic, rest } = extractTopic(args, ["--spec"]);
+	const json = rest.includes("--json");
+	const strict = rest.includes("--strict");
+	const specIdx = rest.indexOf("--spec");
+	const spec = specIdx >= 0 ? rest[specIdx + 1] : "folio";
 	if (specIdx >= 0 && !spec) {
-		throw new Error("Usage: folio lint [--spec folio] [--json] [--strict]");
+		throw new Error(
+			"Usage: folio lint [<topic>] [--spec folio] [--json] [--strict]",
+		);
 	}
 
-	const active = getActive();
+	const draftTopic = topic ?? process.env.FOLIO_DRAFT;
 	let storeDir: string;
 
-	if (active && existsSync(`${AMEND_DIR}/${active}`)) {
-		storeDir = `${AMEND_DIR}/${active}`;
+	if (draftTopic) {
+		const slug = topicToSlug(draftTopic);
+		const path = amendmentPath(slug);
+		if (!worktreeExists(path)) {
+			throw new Error(
+				`Worktree for '${slug}' not found. Run 'folio draft ${draftTopic}'.`,
+			);
+		}
+		storeDir = path;
 	} else if (mainExists()) {
 		storeDir = baseRepo();
 	} else {

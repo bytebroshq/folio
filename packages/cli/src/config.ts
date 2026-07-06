@@ -12,7 +12,6 @@ export const BASE_REPO = `${STORE_DIR}/.main`;
 export type ConfigKey =
 	| "remote"
 	| "store"
-	| "active"
 	| "web"
 	| "source"
 	| "path"
@@ -44,7 +43,7 @@ export function readConfig(key?: ConfigKey): string | null {
 export function writeConfig(key: ConfigKey, value: string): void {
 	const file = existsSync(CONFIG_FILE)
 		? readFileSync(CONFIG_FILE, "utf-8")
-		: "remote: \nstore: git\nactive: \n";
+		: "remote: \nstore: git\n";
 
 	const regex = new RegExp(`^${key}:.*$`, "m");
 	const line = `${key}: ${value}`;
@@ -68,7 +67,6 @@ export function ensureConfig(): void {
 	if (!existsSync(CONFIG_FILE)) {
 		writeConfig("remote", "");
 		writeConfig("store", "git");
-		writeConfig("active", "");
 	}
 
 	// Migration shim: legacy configs stored the bind target under `source`.
@@ -78,18 +76,6 @@ export function ensureConfig(): void {
 		writeConfig("path", legacySource);
 		writeConfig("source", "");
 	}
-}
-
-export function getActive(): string | null {
-	return readConfig("active");
-}
-
-export function setActive(topic: string): void {
-	writeConfig("active", topic);
-}
-
-export function clearActive(): void {
-	writeConfig("active", "");
 }
 
 export function topicToSlug(topic: string): string {

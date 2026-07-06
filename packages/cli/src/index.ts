@@ -3,7 +3,9 @@
  * folio — knowledge management CLI (amendments model)
  *
  * User-scoped. Global config in ~/.config/folio/config.yml.
- * One active amendment at a time. Amendments are git worktrees.
+ * Amendments are git worktrees; multiple drafts run concurrently. Every
+ * draft verb takes its topic explicitly (arg, or $FOLIO_DRAFT) — no shared
+ * "active" pointer, so concurrent agents never collide.
  */
 import pkg from "../package.json";
 import {
@@ -38,24 +40,30 @@ Usage:
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
   folio draft <topic>              Start or resume a draft (--force to restart)
-  folio save [-m "msg"]             Save changes in the active draft
-  folio proof                      Lint + rebase; push + open draft PR (pr) or show diff (local)
-  folio publish                    Merge the draft into main (pr: only once PR is ready)
-  folio status [-u] [-x]           Show current state; -u updates, -x includes PR context
+  folio save <topic> [-m "msg"]    Save changes in a draft
+  folio proof <topic>              Lint + rebase; push + open draft PR (pr) or show diff (local)
+  folio publish <topic>            Merge the draft into main (pr: only once PR is ready)
+  folio status [-u]                Fleet dashboard: every draft's state; -u fast-forwards main
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
   folio config                     Show global config
   folio config <key> <value>       Set config value
   folio web                        Open Folio Web or GitHub PR list for bound repo
   folio web --no-open              Print URL only
-  folio lint                       Check folio integrity
+  folio lint [<topic>]             Check folio integrity (a draft, or main if omitted)
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
   folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
-Flow: draft → edit → save → proof → publish.
+Flow: draft <topic> → edit → save <topic> → proof <topic> → publish <topic>.
+
+Every draft verb resolves its topic as: explicit argument, then
+$FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
+wraps the whole ritual in a single process; interactive agents should keep
+passing the topic explicitly. Chain steps with && (e.g. folio save my-topic
+-m "..." && folio proof my-topic) — verbs stay single-purpose.
 `);
 	process.exit(0);
 }
