@@ -2100,10 +2100,9 @@ Flow: draft <topic> → edit → save <topic> → proof <topic> → publish <top
 Every draft verb resolves its topic as: explicit argument, then
 $FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
-passing the topic explicitly. Chain steps with && (e.g. folio save my-topic
--m "..." && folio proof my-topic) — verbs stay single-purpose.
-
-Tip: verbs chain — folio draft t && ... && folio save t -m "..." && folio proof t
+passing the topic explicitly. Chain steps with && (e.g. folio draft my-topic
+&& ... && folio save my-topic -m "..." && folio proof my-topic) — verbs stay
+single-purpose.
 `);
   process.exit(0);
 }
