@@ -2,7 +2,7 @@
 // package.json
 var package_default = {
   name: "@folio/cli",
-  version: "0.3.0",
+  version: "0.3.1",
   private: true,
   type: "module",
   bin: {
@@ -760,9 +760,9 @@ function openBrowser(url) {
 var skillBundle = {
   "SKILL.md": `---
 name: folio
-description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. Works with or without the folio CLI.
+description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. The folio CLI, when installed, is the fast path — chainable verbs from draft to publish; manual git works too.
 metadata:
-  folio-cli-version: 0.3.0
+  folio-cli-version: 0.3.1
 ---
 
 # Folio skill
@@ -813,6 +813,11 @@ Start here to establish a strategy moving forward.
 4. Check for pending folio drafts touching your topic; treat them as pending, not truth.
 
 ### Write
+
+When the CLI is installed, prefer it. Verbs take the topic explicitly and
+chain with \`&&\`, so a whole draft → edit → save → proof pass can be one
+turn. Verbs are idempotent — on failure, fix and replay the same chain
+rather than inspecting state.
 
 1.1 **CLI Driven** → \`references/workflow-cli.md\`
 1.2 **Manual Approach** → \`references/workflow-manual.md\`
@@ -1555,6 +1560,8 @@ function cmdDraft(args) {
   }
   console.log(`✓ Draft '${slug}' created.`);
   console.log(`  store: ${path}/`);
+  console.log(`  next:  edit leaves in the store, then`);
+  console.log(`         folio save ${topic} -m "..." && folio proof ${topic}`);
 }
 var VERB_EXAMPLES = {
   save: `folio save <topic> -m "..."`,
@@ -2093,8 +2100,9 @@ Flow: draft <topic> → edit → save <topic> → proof <topic> → publish <top
 Every draft verb resolves its topic as: explicit argument, then
 $FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
-passing the topic explicitly. Chain steps with && (e.g. folio save my-topic
--m "..." && folio proof my-topic) — verbs stay single-purpose.
+passing the topic explicitly. Chain steps with && (e.g. folio draft my-topic
+&& ... && folio save my-topic -m "..." && folio proof my-topic) — verbs stay
+single-purpose.
 `);
   process.exit(0);
 }
