@@ -173,7 +173,8 @@ vs main. Chain them with `&&`, naming the topic once:
 folio proof my-topic
 ```
 
-Publish — merges into main (pr strategy: only once the PR is marked ready):
+Publish — merges into main (pr strategy: only once the PR is marked ready;
+merge strategy: squash-merges locally):
 
 ```bash
 folio publish my-topic
@@ -201,7 +202,7 @@ folio bind ... --remote|--local      force how an ambiguous target is read
 folio create <path>                  scaffold a new folio and bind to it
 folio draft <topic>                  start or resume a draft (--force to restart)
 folio proof <topic>                  commit dirty work, lint, rebase; push + draft PR (pr) or show diff (merge)
-folio publish <topic>                merge the draft into main
+folio publish <topic>                merge the draft into main (squash for merge strategy)
 folio status [-u]                    fleet dashboard: every draft's state; -u fast-forwards main
 folio list                           list drafts
 folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)

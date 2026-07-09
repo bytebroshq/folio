@@ -184,7 +184,7 @@ export function worktreeExists(path: string): boolean {
  * Batch-fetch open PRs for a set of branch names.
  * Returns a Map<headRefName, {number, isDraft}> — one gh call instead of N.
  */
-function batchPRs(
+export function listOpenPRMap(
 	remote: string,
 ): Map<string, { number: string; isDraft: boolean }> {
 	const map = new Map<string, { number: string; isDraft: boolean }>();
@@ -252,7 +252,7 @@ export function listAmendments(): {
 	}
 
 	const prMap = remote
-		? batchPRs(remote)
+		? listOpenPRMap(remote)
 		: new Map<string, { number: string; isDraft: boolean }>();
 
 	for (const topic of topics) {
