@@ -2,7 +2,7 @@
 name: folio
 description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. The folio CLI, when installed, is the fast path — chainable verbs from draft to publish; manual git works too.
 metadata:
-  folio-cli-version: 0.3.1
+  folio-cli-version: 0.3.2
 ---
 
 # Folio skill
