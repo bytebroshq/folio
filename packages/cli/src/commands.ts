@@ -34,6 +34,7 @@ import {
 	isDirty,
 	isMergedToMain,
 	listAmendments,
+	listOpenPRMap,
 	mainExists,
 	mainRef,
 	parseGitHubOrigin,
@@ -521,6 +522,7 @@ function resolveDraft(
 	verb: string,
 	args: string[],
 	valueFlags: string[] = [],
+	adoptRemote = false,
 ): { slug: string; path: string; rest: string[] } {
 	const { topic: explicit, rest } = extractTopic(args, valueFlags);
 	const topic = explicit ?? process.env.FOLIO_DRAFT;
@@ -534,6 +536,45 @@ function resolveDraft(
 	const slug = topicToSlug(topic);
 	const path = amendmentPath(slug);
 	if (!worktreeExists(path)) {
+		if (adoptRemote && getStrategy() === "pr" && hasRemote()) {
+			const remote = getRemote();
+			const branch = `amend/${slug}`;
+			const prNum = findOpenPR(remote, branch);
+			if (prNum) {
+				const branchExists =
+					run(
+						`git -C "${baseRepo()}" show-ref --verify --quiet "refs/heads/${branch}"`,
+						{ quiet: true },
+					).exitCode === 0;
+				console.log(
+					`Adopting remote-only draft '${slug}' from PR #${prNum}...`,
+				);
+				const fetch = run(
+					`git -C "${baseRepo()}" fetch origin "${branch}" --quiet`,
+					{ quiet: true },
+				);
+				if (fetch.exitCode === 0) {
+					if (branchExists) {
+						run(
+							`git -C "${baseRepo()}" branch -f "${branch}" "origin/${branch}" --quiet`,
+							{ quiet: true },
+						);
+					}
+					const worktree = branchExists
+						? run(
+								`git -C "${baseRepo()}" worktree add "${path}" "${branch}" --quiet`,
+								{ quiet: true },
+							)
+						: run(
+								`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" "origin/${branch}" --quiet`,
+								{ quiet: true },
+							);
+					if (worktree.exitCode === 0) {
+						return { slug, path, rest };
+					}
+				}
+			}
+		}
 		throw new Error(
 			`Worktree for '${slug}' not found. Run 'folio draft ${topic}'.`,
 		);
@@ -646,7 +687,7 @@ export function cmdProof(args: string[]): void {
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { slug, path, rest } = resolveDraft("proof", args, ["-m"]);
+	const { slug, path, rest } = resolveDraft("proof", args, ["-m"], true);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
 		throw new Error(`Draft '${slug}' is not on a branch.`);
@@ -687,7 +728,7 @@ export function cmdProof(args: string[]): void {
 
 	// Force-push and create/update the draft PR.
 	const push = run(
-		`git -C "${path}" push --force origin "${branch}" --quiet 2>&1`,
+		`git -C "${path}" push --force-with-lease origin "${branch}" --quiet 2>&1`,
 	);
 	if (push.exitCode !== 0) {
 		throw new Error("Push failed. Check network and access.");
@@ -733,6 +774,52 @@ function cleanupDraft(slug: string, path: string, branch: string): void {
 	console.log(`  Draft '${slug}' closed.`);
 }
 
+function ensurePublishCurrency(slug: string, branch: string): void {
+	if (getStrategy() === "pr") {
+		fetchMain();
+	}
+
+	const check = run(
+		`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`,
+		{ quiet: true },
+	);
+	if (check.exitCode !== 0) {
+		throw new Error(
+			`main moved since proof — run 'folio proof ${slug} && folio publish ${slug}'`,
+		);
+	}
+}
+
+function translatePublishFailure(
+	slug: string,
+	branch: string,
+	prNum: string | undefined,
+	output: string,
+): string {
+	const text = output.trim() || "Merge failed.";
+	if (/(still a draft|draft state|draft pull request)/i.test(text)) {
+		if (prNum) {
+			return `PR #${prNum} is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+		}
+		return `Draft PR is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+	}
+	if (
+		/(merge conflict|conflict|not up to date|out of date|behind|main moved|rebase)/i.test(
+			text,
+		)
+	) {
+		return `Merge blocked by conflicts or a stale branch — run 'folio proof ${slug}' first.`;
+	}
+	if (
+		/(protected branch|branch protection|required status checks|ruleset)/i.test(
+			text,
+		)
+	) {
+		return `Merge blocked by branch protection: ${text}. Check repository settings or required status checks.`;
+	}
+	return `Merge failed for ${branch}: ${text}`;
+}
+
 export function cmdPublish(args: string[]): void {
 	ensureConfig();
 	const local = getStrategy() === "merge";
@@ -746,13 +833,27 @@ export function cmdPublish(args: string[]): void {
 	}
 
 	if (local) {
+		ensurePublishCurrency(slug, branch);
 		// Merge-strategy publish mutates the shared base repo's main branch —
 		// serialize with status -u under the coarse lock.
 		const merge = withMainLock(() =>
-			run(`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`),
+			run(`git -C "${baseRepo()}" merge "${branch}" --squash --quiet 2>&1`),
 		);
 		if (merge.exitCode !== 0) {
-			throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
+			throw new Error(
+				translatePublishFailure(
+					slug,
+					branch,
+					undefined,
+					merge.stderr || merge.stdout,
+				),
+			);
+		}
+		const commit = withMainLock(() =>
+			run(`git -C "${baseRepo()}" commit -m "publish: ${slug}" --quiet 2>&1`),
+		);
+		if (commit.exitCode !== 0) {
+			throw new Error(`Merge commit failed: ${commit.stderr || commit.stdout}`);
 		}
 		console.log(`✓ Published '${slug}' into main.`);
 		cleanupDraft(slug, path, branch);
@@ -766,11 +867,20 @@ export function cmdPublish(args: string[]): void {
 		);
 	}
 
+	ensurePublishCurrency(slug, branch);
+
 	const merge = run(
 		`gh pr merge --repo "${remote}" ${prNum} --squash --delete-branch 2>&1`,
 	);
 	if (merge.exitCode !== 0) {
-		throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
+		throw new Error(
+			translatePublishFailure(
+				slug,
+				branch,
+				prNum,
+				merge.stderr || merge.stdout,
+			),
+		);
 	}
 	console.log(`✓ Published '${slug}' — PR #${prNum} merged.`);
 
@@ -995,6 +1105,58 @@ export function cmdStatus(args: string[] = []): void {
 
 	// Fleet dashboard — every open draft worktree under stores/amendments/.
 	const drafts = listAmendments();
+	if (getStrategy() === "pr" && remote) {
+		const remoteDrafts = listOpenPRMap(remote);
+		const rows = new Map<
+			string,
+			{ topic: string; state: string; branch: string }
+		>();
+
+		for (const draft of drafts) {
+			const branch = `amend/${draft.topic}`;
+			const info = remoteDrafts.get(branch);
+			const proofed = info && draft.status !== "dirty";
+			rows.set(branch, {
+				topic: draft.topic,
+				state: info
+					? `${proofed ? "proofed" : "unproofed"} · PR #${info.number} ${
+							info.isDraft ? "(draft)" : "(ready)"
+						}`
+					: "unproofed",
+				branch,
+			});
+		}
+
+		for (const [branch, info] of remoteDrafts) {
+			if (rows.has(branch)) continue;
+			const topic = branch.startsWith("amend/")
+				? branch.slice("amend/".length)
+				: branch;
+			rows.set(branch, {
+				topic,
+				state: `unproofed · PR #${info.number} ${
+					info.isDraft ? "(draft)" : "(ready)"
+				}`,
+				branch,
+			});
+		}
+
+		const ordered = [...rows.values()].sort((a, b) =>
+			a.topic.localeCompare(b.topic),
+		);
+		if (ordered.length === 0) {
+			console.log("No drafts");
+		} else {
+			console.log("");
+			console.log("Drafts:");
+			for (const row of ordered) {
+				console.log(`  ${row.topic.padEnd(30)} ${row.state}`);
+			}
+		}
+		printStatusFooter(bound, base);
+		return;
+	}
+
 	if (drafts.length === 0) {
 		console.log("No drafts");
 	} else {

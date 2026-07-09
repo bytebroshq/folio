@@ -56,9 +56,10 @@ Start here to establish a strategy moving forward.
 
 When the CLI is installed, prefer it. Verbs take the topic explicitly and
 chain with `&&`, so the normal agent path is `draft -> edit -> proof`.
-`proof` commits pending draft edits, runs lint, rebases onto the default
-branch, then opens or updates the draft PR for review. Keep `publish`
-separate, and run it only after explicit human approval.
+`proof` commits pending draft edits or adopts a remote-only draft, runs
+lint, rebases onto the default branch, then opens or updates the draft PR
+for review. Keep `publish` separate, and run it only after explicit human
+approval.
 
 1.1 **CLI Driven** → `references/workflow-cli.md`
 1.2 **Manual Approach** → `references/workflow-manual.md`

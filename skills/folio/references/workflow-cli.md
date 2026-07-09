@@ -21,9 +21,10 @@ verb — publish still requires its own explicit run).
 ## Verb ownership
 
 - `draft` opens or resumes an isolated amendment worktree for one topic.
-- `proof` owns review prep: commit pending edits, lint, rebase, then push and
-  open or update a draft PR for `strategy: pr`, or show the rebased diff for
-  `strategy: merge`.
+- `proof` owns review prep: commit pending edits, or adopt a remote-only
+  draft when the local worktree is missing, then lint, rebase, and push with
+  `--force-with-lease`; for `strategy: pr` it opens or updates a draft PR, and
+  for `strategy: merge` it shows the rebased diff.
 - `publish` owns landing only: check currency, attempt the merge, translate
   failures, and clean up after success. It does not commit dirty edits, mark a
   PR ready, batch drafts, or publish all topics.
@@ -52,7 +53,7 @@ command self-documents the transcript.
 `folio config` reports the binding as three keys: `remote` (owner/repo, if GitHub-backed), `path` (where the checkout lives), and `strategy` — which names what `publish` does.
 
 - **`strategy: pr`** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.
-- **`strategy: merge`** — no PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` merges when the human says so.
+- **`strategy: merge`** — no PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` squash-merges when the human says so.
 
 ## Multiplayer semantics
 
