@@ -2,7 +2,7 @@
 // package.json
 var package_default = {
   name: "@folio/cli",
-  version: "0.3.1",
+  version: "0.3.2",
   private: true,
   type: "module",
   bin: {
@@ -673,7 +673,7 @@ function isDirty(path) {
 function worktreeExists(path) {
   return existsSync2(`${path}/.git`);
 }
-function batchPRs(remote) {
+function listOpenPRMap(remote) {
   const map = new Map;
   const result = gh(`pr list --state open --json number,headRefName,isDraft --jq '.[] | .headRefName + "@" + (.number|tostring) + "@" + (.isDraft|tostring)'`, remote);
   if (!result.stdout)
@@ -719,7 +719,7 @@ function listAmendments() {
       topicBranches.set(topic, branch);
     topics.push(topic);
   }
-  const prMap = remote ? batchPRs(remote) : new Map;
+  const prMap = remote ? listOpenPRMap(remote) : new Map;
   for (const topic of topics) {
     const path = `${AMEND_DIR}/${topic}`;
     const dirty = isDirty(path);
@@ -762,7 +762,7 @@ var skillBundle = {
 name: folio
 description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. The folio CLI, when installed, is the fast path — chainable verbs from draft to publish; manual git works too.
 metadata:
-  folio-cli-version: 0.3.1
+  folio-cli-version: 0.3.2
 ---
 
 # Folio skill
@@ -816,9 +816,10 @@ Start here to establish a strategy moving forward.
 
 When the CLI is installed, prefer it. Verbs take the topic explicitly and
 chain with \`&&\`, so the normal agent path is \`draft -> edit -> proof\`.
-\`proof\` commits pending draft edits, runs lint, rebases onto the default
-branch, then opens or updates the draft PR for review. Keep \`publish\`
-separate, and run it only after explicit human approval.
+\`proof\` commits pending draft edits or adopts a remote-only draft, runs
+lint, rebases onto the default branch, then opens or updates the draft PR
+for review. Keep \`publish\` separate, and run it only after explicit human
+approval.
 
 1.1 **CLI Driven** → \`references/workflow-cli.md\`
 1.2 **Manual Approach** → \`references/workflow-manual.md\`
@@ -974,9 +975,10 @@ verb — publish still requires its own explicit run).
 ## Verb ownership
 
 - \`draft\` opens or resumes an isolated amendment worktree for one topic.
-- \`proof\` owns review prep: commit pending edits, lint, rebase, then push and
-  open or update a draft PR for \`strategy: pr\`, or show the rebased diff for
-  \`strategy: merge\`.
+- \`proof\` owns review prep: commit pending edits, or adopt a remote-only
+  draft when the local worktree is missing, then lint, rebase, and push with
+  \`--force-with-lease\`; for \`strategy: pr\` it opens or updates a draft PR, and
+  for \`strategy: merge\` it shows the rebased diff.
 - \`publish\` owns landing only: check currency, attempt the merge, translate
   failures, and clean up after success. It does not commit dirty edits, mark a
   PR ready, batch drafts, or publish all topics.
@@ -1005,7 +1007,7 @@ command self-documents the transcript.
 \`folio config\` reports the binding as three keys: \`remote\` (owner/repo, if GitHub-backed), \`path\` (where the checkout lives), and \`strategy\` — which names what \`publish\` does.
 
 - **\`strategy: pr\`** — \`proof\` pushes the \`amend/\` branch and opens or updates a draft PR. \`publish\` squash-merges into the default branch.
-- **\`strategy: merge\`** — no PR. \`proof\` lints, rebases onto the default branch, and shows the diff. \`publish\` merges when the human says so.
+- **\`strategy: merge\`** — no PR. \`proof\` lints, rebases onto the default branch, and shows the diff. \`publish\` squash-merges when the human says so.
 
 ## Multiplayer semantics
 
@@ -1603,7 +1605,7 @@ function extractTopic(args, valueFlags = []) {
   }
   return { topic, rest };
 }
-function resolveDraft(verb, args, valueFlags = []) {
+function resolveDraft(verb, args, valueFlags = [], adoptRemote = false) {
   const { topic: explicit, rest } = extractTopic(args, valueFlags);
   const topic = explicit ?? process.env.FOLIO_DRAFT;
   if (!topic) {
@@ -1613,6 +1615,34 @@ function resolveDraft(verb, args, valueFlags = []) {
   const slug = topicToSlug(topic);
   const path = amendmentPath(slug);
   if (!worktreeExists(path)) {
+    if (adoptRemote && getStrategy() === "pr" && hasRemote()) {
+      const remote = getRemote();
+      const branch = `amend/${slug}`;
+      const pr = findOpenPRResult(remote, branch);
+      if (pr.error) {
+        throw new Error(`Could not look up remote draft '${slug}': ${pr.error}`);
+      }
+      if (!pr.number) {
+        throw new Error(`Worktree for '${slug}' not found, and no open PR exists for ${branch}. Run 'folio draft ${topic}'.`);
+      }
+      const branchExists = run(`git -C "${baseRepo()}" show-ref --verify --quiet "refs/heads/${branch}"`, { quiet: true }).exitCode === 0;
+      console.log(`Adopting remote-only draft '${slug}' from PR #${pr.number}...`);
+      const fetch = run(`git -C "${baseRepo()}" fetch origin "${branch}" --quiet 2>&1`, { quiet: true });
+      if (fetch.exitCode !== 0) {
+        throw new Error(`Could not fetch remote draft '${slug}' from ${branch}: ${fetch.stderr || fetch.stdout}`);
+      }
+      if (branchExists) {
+        const reset = run(`git -C "${baseRepo()}" branch -f "${branch}" "origin/${branch}" --quiet 2>&1`, { quiet: true });
+        if (reset.exitCode !== 0) {
+          throw new Error(`Could not reset local draft branch '${branch}' to origin/${branch}: ${reset.stderr || reset.stdout}`);
+        }
+      }
+      const worktree = branchExists ? run(`git -C "${baseRepo()}" worktree add "${path}" "${branch}" --quiet 2>&1`, { quiet: true }) : run(`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" "origin/${branch}" --quiet 2>&1`, { quiet: true });
+      if (worktree.exitCode !== 0) {
+        throw new Error(`Could not create worktree for remote draft '${slug}': ${worktree.stderr || worktree.stdout}`);
+      }
+      return { slug, path, rest };
+    }
     throw new Error(`Worktree for '${slug}' not found. Run 'folio draft ${topic}'.`);
   }
   return { slug, path, rest };
@@ -1627,8 +1657,18 @@ function draftHasChanges(path) {
   }).stdout !== "";
 }
 function findOpenPR(remote, branch) {
-  const prNum = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`, remote).stdout;
-  return prNum && prNum !== "null" ? prNum : "";
+  const pr = findOpenPRResult(remote, branch);
+  return pr.number;
+}
+function findOpenPRResult(remote, branch) {
+  const prNum = gh(`pr list --head "${branch}" --state open --json number --jq '.[0].number'`, remote);
+  if (prNum.exitCode !== 0) {
+    return { number: "", error: prNum.stderr || prNum.stdout || "gh failed" };
+  }
+  return {
+    number: prNum.stdout && prNum.stdout !== "null" ? prNum.stdout : "",
+    error: ""
+  };
 }
 var LOCK_PATH = `${STORE_DIR}/.lock`;
 var LOCK_STALE_MS = 60000;
@@ -1690,7 +1730,7 @@ function cmdProof(args) {
   const remote = local ? "" : getRemote();
   if (!local)
     ensureGh();
-  const { slug, path, rest } = resolveDraft("proof", args, ["-m"]);
+  const { slug, path, rest } = resolveDraft("proof", args, ["-m"], true);
   const branch = amendmentBranch(path);
   if (!branch || branch === "?") {
     throw new Error(`Draft '${slug}' is not on a branch.`);
@@ -1715,7 +1755,9 @@ function cmdProof(args) {
     console.log(`Run 'folio publish ${slug}' when ready.`);
     return;
   }
-  const push = run(`git -C "${path}" push --force origin "${branch}" --quiet 2>&1`);
+  const hasRemoteTracking = run(`git -C "${path}" show-ref --verify --quiet "refs/remotes/origin/${branch}"`, { quiet: true }).exitCode === 0;
+  const lease = hasRemoteTracking ? "--force-with-lease" : `--force-with-lease=refs/heads/${branch}:`;
+  const push = run(`git -C "${path}" push --set-upstream ${lease} origin "${branch}" --quiet 2>&1`);
   if (push.exitCode !== 0) {
     throw new Error("Push failed. Check network and access.");
   }
@@ -1745,6 +1787,31 @@ function cleanupDraft(slug, path, branch) {
   run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
   console.log(`  Draft '${slug}' closed.`);
 }
+function ensurePublishCurrency(slug, branch) {
+  if (getStrategy() === "pr") {
+    fetchMain();
+  }
+  const check = run(`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`, { quiet: true });
+  if (check.exitCode !== 0) {
+    throw new Error(`main moved since proof — run 'folio proof ${slug} && folio publish ${slug}'`);
+  }
+}
+function translatePublishFailure(slug, branch, prNum, output) {
+  const text = output.trim() || "Merge failed.";
+  if (/(still a draft|draft state|draft pull request)/i.test(text)) {
+    if (prNum) {
+      return `PR #${prNum} is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+    }
+    return `Draft PR is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+  }
+  if (/(merge conflict|conflict|not up to date|out of date|behind|main moved|rebase)/i.test(text)) {
+    return `Merge blocked by conflicts or a stale branch — run 'folio proof ${slug}' first.`;
+  }
+  if (/(protected branch|branch protection|required status checks|ruleset)/i.test(text)) {
+    return `Merge blocked by branch protection: ${text}. Check repository settings or required status checks.`;
+  }
+  return `Merge failed for ${branch}: ${text}`;
+}
 function cmdPublish(args) {
   ensureConfig();
   const local = getStrategy() === "merge";
@@ -1757,9 +1824,14 @@ function cmdPublish(args) {
     throw new Error(`Draft '${slug}' is not on a branch.`);
   }
   if (local) {
-    const merge2 = withMainLock(() => run(`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`));
+    ensurePublishCurrency(slug, branch);
+    const merge2 = withMainLock(() => run(`git -C "${baseRepo()}" merge "${branch}" --squash --quiet 2>&1`));
     if (merge2.exitCode !== 0) {
-      throw new Error(`Merge failed: ${merge2.stderr || merge2.stdout}`);
+      throw new Error(translatePublishFailure(slug, branch, undefined, merge2.stderr || merge2.stdout));
+    }
+    const commit = withMainLock(() => run(`git -C "${baseRepo()}" commit -m "publish: ${slug}" --quiet 2>&1`));
+    if (commit.exitCode !== 0) {
+      throw new Error(`Merge commit failed: ${commit.stderr || commit.stdout}`);
     }
     console.log(`✓ Published '${slug}' into main.`);
     cleanupDraft(slug, path, branch);
@@ -1769,9 +1841,10 @@ function cmdPublish(args) {
   if (!prNum) {
     throw new Error(`No open PR for '${slug}'. Run 'folio proof ${slug}' first to send it for review.`);
   }
+  ensurePublishCurrency(slug, branch);
   const merge = run(`gh pr merge --repo "${remote}" ${prNum} --squash --delete-branch 2>&1`);
   if (merge.exitCode !== 0) {
-    throw new Error(`Merge failed: ${merge.stderr || merge.stdout}`);
+    throw new Error(translatePublishFailure(slug, branch, prNum, merge.stderr || merge.stdout));
   }
   console.log(`✓ Published '${slug}' — PR #${prNum} merged.`);
   const ff = withMainLock(() => run(`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`, { quiet: true }));
@@ -1855,6 +1928,9 @@ function draftState(d) {
   }
   return "saved";
 }
+function branchIncludesMain(branch) {
+  return run(`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`, { quiet: true }).exitCode === 0;
+}
 function cmdStatus(args = []) {
   ensureConfig();
   const remote = readConfig("remote");
@@ -1901,6 +1977,42 @@ function cmdStatus(args = []) {
     }
   }
   const drafts = listAmendments();
+  if (getStrategy() === "pr" && remote) {
+    const remoteDrafts = listOpenPRMap(remote);
+    const rows = new Map;
+    for (const draft of drafts) {
+      const branch = `amend/${draft.topic}`;
+      const info = remoteDrafts.get(branch);
+      const proofed = info && draft.status !== "dirty" && branchIncludesMain(branch);
+      rows.set(branch, {
+        topic: draft.topic,
+        state: info ? `${proofed ? "proofed" : "unproofed"} · PR #${info.number} ${info.isDraft ? "(draft)" : "(ready)"}` : "unproofed",
+        branch
+      });
+    }
+    for (const [branch, info] of remoteDrafts) {
+      if (rows.has(branch))
+        continue;
+      const topic = branch.startsWith("amend/") ? branch.slice("amend/".length) : branch;
+      rows.set(branch, {
+        topic,
+        state: `unproofed · PR #${info.number} ${info.isDraft ? "(draft)" : "(ready)"}`,
+        branch
+      });
+    }
+    const ordered = [...rows.values()].sort((a, b) => a.topic.localeCompare(b.topic));
+    if (ordered.length === 0) {
+      console.log("No drafts");
+    } else {
+      console.log("");
+      console.log("Drafts:");
+      for (const row of ordered) {
+        console.log(`  ${row.topic.padEnd(30)} ${row.state}`);
+      }
+    }
+    printStatusFooter(bound, base);
+    return;
+  }
   if (drafts.length === 0) {
     console.log("No drafts");
   } else {

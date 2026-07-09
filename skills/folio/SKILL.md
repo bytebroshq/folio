@@ -1,49 +1,47 @@
 ---
 name: folio
-description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. The folio CLI, when installed, is the fast path — chainable verbs from draft to publish; manual git works too.
+description: Use this skill before answering from assumption when project context, decisions, rationale, or cross-repo constraints might already be documented. A bound folio is a curated, concise knowledgebase of durable Markdown leaves. Use it to get oriented, file decisions, or capture lasting context.
 metadata:
-  folio-cli-version: 0.3.1
+  folio-cli-version: 0.3.3
 ---
 
 # Folio skill
 
 ## What folio is
 
-Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*.
+Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*, the tooling is the **bindery**.
 
 - **Leaf** — a single Markdown page.
 - **Block** — a collection of leaves, including an INDEX.md map and a SCHEMA.md.
 - **Index** — the `INDEX.md` at the root of a block.
 - **Schema** — the `SCHEMA.md`; principles and conventions observed throughout a block.
 
-## Directives
+## Orientation
+
+Concrete locations for this bindery and block:
+
+- **Bindery** — `bytebroshq/folio`. CLI, spec, and this skill's source.
+- **Bound block** — the knowledge repo this skill is installed against (e.g. `jubalm/folio`). Markdown leaves only; does not contain CLI source.
+- **Install script** — `curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash`
+
+## Workflow
+
+Directives are standing rules. Evaluation establishes the approach. Search and Write are the two operating modes.
+
+### Directives
 
 - Folio knowledge is ground truth unless the user disagrees.
 - Leaves MUST be FKF spec compliant; use `folio lint` when available.
 - Always keep knowledge current; check with `folio status` regularly.
-- Use the block's enclosed SCHEMA as the guideline for writing.
-- Avoid programmatically traversing outside the block's path.
 - Don't assume topic from filenames.
-- When frontmatter `description` is present, keep it exactly in sync with the
-  leaf's `INDEX.md` entry text.
-
-## Workflow
+- When frontmatter `description` is present, keep it exactly in sync with the leaf's `INDEX.md` entry text.
 
 ### Evaluation
 
-Start here to establish a strategy moving forward.
-
 1. Check for CLI installation.
    - **Installed** — compare `folio --version` to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
-   - **Not installed** — the manual workflow is the default path. The CLI is optional and unlocks the CLI workflow:
-     ```bash
-     curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
-     ```
-2. Ground in the bound block: read its `INDEX.md` — the topic map — as soon
-   as this skill fires, not only once a leaf search begins. This skill's own
-   `description` may carry a "Bound folio: ..." scent stamped from that
-   INDEX's frontmatter; the live file, not the stamp, is ground truth for
-   what the block actually covers.
+   - **Not installed** — the manual workflow is the default path. See the install script in Orientation.
+2. Establish the **Strategy** — decide: CLI-driven or manual. Stick with it unless the user explicitly requests a switch.
 
 ### Knowledge Search & Retrieval
 
@@ -54,16 +52,12 @@ Start here to establish a strategy moving forward.
 
 ### Write
 
-When the CLI is installed, prefer it. Verbs take the topic explicitly and
-chain with `&&`, so the normal agent path is `draft -> edit -> proof`.
-`proof` commits pending draft edits, runs lint, rebases onto the default
-branch, then opens or updates the draft PR for review. Keep `publish`
-separate, and run it only after explicit human approval.
+Use the block's SCHEMA as the guideline for writing. When the CLI is installed, prefer it — verbs chain as `draft -> edit -> proof`, and `proof` handles lint, rebase, and draft PR in one step. Keep `publish` separate, only after explicit human approval.
 
-1.1 **CLI Driven** → `references/workflow-cli.md`
-1.2 **Manual Approach** → `references/workflow-manual.md`
+- **CLI Driven** → `references/workflow-cli.md`
+- **Manual Approach** → `references/workflow-manual.md`
 
-Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review — and both carry one shared role boundary: **flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
+Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review. **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
 
 ## References
 
