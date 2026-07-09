@@ -539,41 +539,61 @@ function resolveDraft(
 		if (adoptRemote && getStrategy() === "pr" && hasRemote()) {
 			const remote = getRemote();
 			const branch = `amend/${slug}`;
-			const prNum = findOpenPR(remote, branch);
-			if (prNum) {
-				const branchExists =
-					run(
-						`git -C "${baseRepo()}" show-ref --verify --quiet "refs/heads/${branch}"`,
-						{ quiet: true },
-					).exitCode === 0;
-				console.log(
-					`Adopting remote-only draft '${slug}' from PR #${prNum}...`,
+			const pr = findOpenPRResult(remote, branch);
+			if (pr.error) {
+				throw new Error(
+					`Could not look up remote draft '${slug}': ${pr.error}`,
 				);
-				const fetch = run(
-					`git -C "${baseRepo()}" fetch origin "${branch}" --quiet`,
+			}
+			if (!pr.number) {
+				throw new Error(
+					`Worktree for '${slug}' not found, and no open PR exists for ${branch}. Run 'folio draft ${topic}'.`,
+				);
+			}
+
+			const branchExists =
+				run(
+					`git -C "${baseRepo()}" show-ref --verify --quiet "refs/heads/${branch}"`,
+					{ quiet: true },
+				).exitCode === 0;
+			console.log(
+				`Adopting remote-only draft '${slug}' from PR #${pr.number}...`,
+			);
+			const fetch = run(
+				`git -C "${baseRepo()}" fetch origin "${branch}" --quiet 2>&1`,
+				{ quiet: true },
+			);
+			if (fetch.exitCode !== 0) {
+				throw new Error(
+					`Could not fetch remote draft '${slug}' from ${branch}: ${fetch.stderr || fetch.stdout}`,
+				);
+			}
+			if (branchExists) {
+				const reset = run(
+					`git -C "${baseRepo()}" branch -f "${branch}" "origin/${branch}" --quiet 2>&1`,
 					{ quiet: true },
 				);
-				if (fetch.exitCode === 0) {
-					if (branchExists) {
-						run(
-							`git -C "${baseRepo()}" branch -f "${branch}" "origin/${branch}" --quiet`,
-							{ quiet: true },
-						);
-					}
-					const worktree = branchExists
-						? run(
-								`git -C "${baseRepo()}" worktree add "${path}" "${branch}" --quiet`,
-								{ quiet: true },
-							)
-						: run(
-								`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" "origin/${branch}" --quiet`,
-								{ quiet: true },
-							);
-					if (worktree.exitCode === 0) {
-						return { slug, path, rest };
-					}
+				if (reset.exitCode !== 0) {
+					throw new Error(
+						`Could not reset local draft branch '${branch}' to origin/${branch}: ${reset.stderr || reset.stdout}`,
+					);
 				}
 			}
+			const worktree = branchExists
+				? run(
+						`git -C "${baseRepo()}" worktree add "${path}" "${branch}" --quiet 2>&1`,
+						{ quiet: true },
+					)
+				: run(
+						`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" "origin/${branch}" --quiet 2>&1`,
+						{ quiet: true },
+					);
+			if (worktree.exitCode !== 0) {
+				throw new Error(
+					`Could not create worktree for remote draft '${slug}': ${worktree.stderr || worktree.stdout}`,
+				);
+			}
+			return { slug, path, rest };
 		}
 		throw new Error(
 			`Worktree for '${slug}' not found. Run 'folio draft ${topic}'.`,
@@ -598,11 +618,25 @@ function draftHasChanges(path: string): boolean {
 
 /** Look up the open PR number for a branch, if any. Empty string if none. */
 function findOpenPR(remote: string, branch: string): string {
+	const pr = findOpenPRResult(remote, branch);
+	return pr.number;
+}
+
+function findOpenPRResult(
+	remote: string,
+	branch: string,
+): { number: string; error: string } {
 	const prNum = gh(
 		`pr list --head "${branch}" --state open --json number --jq '.[0].number'`,
 		remote,
-	).stdout;
-	return prNum && prNum !== "null" ? prNum : "";
+	);
+	if (prNum.exitCode !== 0) {
+		return { number: "", error: prNum.stderr || prNum.stdout || "gh failed" };
+	}
+	return {
+		number: prNum.stdout && prNum.stdout !== "null" ? prNum.stdout : "",
+		error: "",
+	};
 }
 
 // ── main-repo lock ───────────────────────────────────────────────────
@@ -1035,6 +1069,15 @@ function draftState(d: {
 	return "saved";
 }
 
+function branchIncludesMain(branch: string): boolean {
+	return (
+		run(
+			`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`,
+			{ quiet: true },
+		).exitCode === 0
+	);
+}
+
 /** `folio status` is the fleet dashboard: one line per open draft. */
 export function cmdStatus(args: string[] = []): void {
 	ensureConfig();
@@ -1115,7 +1158,8 @@ export function cmdStatus(args: string[] = []): void {
 		for (const draft of drafts) {
 			const branch = `amend/${draft.topic}`;
 			const info = remoteDrafts.get(branch);
-			const proofed = info && draft.status !== "dirty";
+			const proofed =
+				info && draft.status !== "dirty" && branchIncludesMain(branch);
 			rows.set(branch, {
 				topic: draft.topic,
 				state: info
