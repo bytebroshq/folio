@@ -18,7 +18,6 @@ import {
 	cmdList,
 	cmdProof,
 	cmdPublish,
-	cmdSave,
 	cmdSkill,
 	cmdStatus,
 	cmdWeb,
@@ -40,9 +39,8 @@ Usage:
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
   folio draft <topic>              Start or resume a draft (--force to restart)
-  folio save <topic> [-m "msg"]    Save changes in a draft
-  folio proof <topic>              Lint + rebase; push + open draft PR (pr) or show diff (local)
-  folio publish <topic>            Merge the draft into main (pr: only once PR is ready)
+  folio proof <topic>              Commit dirty work, lint, rebase; push + open draft PR (pr) or show diff (local)
+  folio publish <topic>            Merge the draft into main
   folio status [-u]                Fleet dashboard: every draft's state; -u fast-forwards main
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
@@ -57,14 +55,13 @@ Usage:
   folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
-Flow: draft <topic> → edit → save <topic> → proof <topic> → publish <topic>.
+Flow: draft <topic> → edit → proof <topic> → publish <topic>.
 
 Every draft verb resolves its topic as: explicit argument, then
 $FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
 passing the topic explicitly. Chain steps with && (e.g. folio draft my-topic
-&& ... && folio save my-topic -m "..." && folio proof my-topic) — verbs stay
-single-purpose.
+&& ... && folio proof my-topic) — verbs stay single-purpose.
 `);
 	process.exit(0);
 }
@@ -87,9 +84,6 @@ try {
 			break;
 		case "draft":
 			cmdDraft(args);
-			break;
-		case "save":
-			cmdSave(args);
 			break;
 		case "proof":
 			cmdProof(args);

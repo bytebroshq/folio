@@ -815,9 +815,10 @@ Start here to establish a strategy moving forward.
 ### Write
 
 When the CLI is installed, prefer it. Verbs take the topic explicitly and
-chain with \`&&\`, so a whole draft → edit → save → proof pass can be one
-turn. Verbs are idempotent — on failure, fix and replay the same chain
-rather than inspecting state.
+chain with \`&&\`, so the normal agent path is \`draft -> edit -> proof\`.
+\`proof\` commits pending draft edits, runs lint, rebases onto the default
+branch, then opens or updates the draft PR for review. Keep \`publish\`
+separate, and run it only after explicit human approval.
 
 1.1 **CLI Driven** → \`references/workflow-cli.md\`
 1.2 **Manual Approach** → \`references/workflow-manual.md\`
@@ -932,10 +933,10 @@ Signals a topic's leaves have drifted:
 5. Update \`INDEX.md\`: remove deleted leaves, reframe descriptions of changed
    ones.
 6. Fix all inbound wikilinks to deleted/renamed leaves.
-7. Save and validate: \`folio save -m "..."\` then \`folio proof\`, or commit and
-   run the manual lint checklist (\`references/linting.md\`). Lint must be
-   clean — broken links, stale index entries, and orphans are the common
-   reorg failures.
+7. Validate the draft: \`folio proof <topic-reorg>\`, or commit manually and run
+   the manual lint checklist (\`references/linting.md\`). Lint must be clean —
+   broken links, stale index entries, and orphans are the common reorg
+   failures.
 8. The draft PR stays draft; a human marks it ready. Never run \`gh pr ready\`.
 
 ## Stale-framing sweep
@@ -957,18 +958,32 @@ When the \`folio\` CLI is installed, the ritual is:
 \`\`\`bash
 folio draft cubby-org-model                                  # opens a draft worktree on amend/cubby-org-model
 # edit leaves in the worktree; keep the delta small and topical
-folio save cubby-org-model -m "..." && folio proof cubby-org-model
+folio proof cubby-org-model
 # a human reviews and marks the PR ready on GitHub
 folio publish cubby-org-model                                 # squash-merges after human approval; cleans up the branch
 \`\`\`
 
-Every draft verb — \`save\`, \`proof\`, \`publish\`, \`drop\`, \`lint\` — takes its
-topic explicitly. This is what makes concurrent drafts safe: nothing is
-shared between processes, so one agent's draft can never be hijacked by
-another's. Chain steps with \`&&\`, naming the topic once per command; verbs
-stay single-purpose (\`proof\` saves any pending edits in the worktree it's
-already given before it lints, but there's no combined "save and publish"
+Every draft verb — \`proof\`, \`publish\`, \`drop\`, \`lint\` — takes its topic
+explicitly. This is what makes concurrent drafts safe: nothing is shared
+between processes, so one agent's draft can never be hijacked by another's.
+Chain steps with \`&&\`, naming the topic once per command; verbs stay
+single-purpose (\`proof\` commits any pending edits in the worktree it's
+already given before it lints, but there's no combined "commit and publish"
 verb — publish still requires its own explicit run).
+
+## Verb ownership
+
+- \`draft\` opens or resumes an isolated amendment worktree for one topic.
+- \`proof\` owns review prep: commit pending edits, lint, rebase, then push and
+  open or update a draft PR for \`strategy: pr\`, or show the rebased diff for
+  \`strategy: merge\`.
+- \`publish\` owns landing only: check currency, attempt the merge, translate
+  failures, and clean up after success. It does not commit dirty edits, mark a
+  PR ready, batch drafts, or publish all topics.
+- \`lint\` is standalone inspection or preflight. It is useful before work starts,
+  but \`proof\` runs lint again over the committed, rebased draft.
+- \`drop\` deletes the draft branch and worktree. Treat it as destructive; use it
+  only when explicitly requested.
 
 ## FOLIO_DRAFT
 
@@ -977,7 +992,7 @@ A script or hook that wraps the whole ritual in one process can set
 
 \`\`\`bash
 export FOLIO_DRAFT=cubby-org-model
-folio save -m "..." && folio proof
+folio proof
 \`\`\`
 
 Resolution order: explicit argument, then \`$FOLIO_DRAFT\`, then an error
@@ -994,8 +1009,8 @@ command self-documents the transcript.
 
 ## Multiplayer semantics
 
-Drafts are independent worktrees; multiple agents can draft, save, and
-proof concurrently without interfering. \`proof\` rebases onto the default
+Drafts are independent worktrees; multiple agents can draft and proof
+concurrently without interfering. \`proof\` rebases onto the default
 branch each time, so publish order across drafts doesn't matter — when one
 draft lands, the others simply re-proof against the new default branch. A
 rebase conflict touching the same leaf surfaces to exactly one agent, with
@@ -1561,10 +1576,9 @@ function cmdDraft(args) {
   console.log(`✓ Draft '${slug}' created.`);
   console.log(`  store: ${path}/`);
   console.log(`  next:  edit leaves in the store, then`);
-  console.log(`         folio save ${topic} -m "..." && folio proof ${topic}`);
+  console.log(`         folio proof ${topic}`);
 }
 var VERB_EXAMPLES = {
-  save: `folio save <topic> -m "..."`,
   proof: "folio proof <topic>",
   publish: "folio publish <topic>",
   drop: "folio drop <topic> --force"
@@ -1658,24 +1672,17 @@ function withMainLock(fn) {
     releaseMainLock();
   }
 }
-function cmdSave(args) {
-  ensureConfig();
-  const { slug, path, rest } = resolveDraft("save", args, ["-m"]);
+function commitDraftChanges(path, slug, rest) {
   let msg = `amend: ${slug}`;
   const mIdx = rest.indexOf("-m");
   if (mIdx >= 0 && mIdx + 1 < rest.length) {
     msg = rest[mIdx + 1];
   }
-  if (!draftHasChanges(path)) {
-    console.log(`Nothing to save in '${slug}'.`);
-    return;
-  }
   run(`git -C "${path}" add -A`);
   const commit = run(`git -C "${path}" commit -m "${msg.replace(/"/g, "\\\"")}" --quiet`);
   if (commit.exitCode !== 0) {
-    throw new Error(`Save failed: ${commit.stderr}`);
+    throw new Error(`Commit failed: ${commit.stderr || commit.stdout}`);
   }
-  console.log(`Saved: ${msg}`);
 }
 function cmdProof(args) {
   ensureConfig();
@@ -1683,18 +1690,18 @@ function cmdProof(args) {
   const remote = local ? "" : getRemote();
   if (!local)
     ensureGh();
-  const { slug, path } = resolveDraft("proof", args);
+  const { slug, path, rest } = resolveDraft("proof", args, ["-m"]);
   const branch = amendmentBranch(path);
   if (!branch || branch === "?") {
     throw new Error(`Draft '${slug}' is not on a branch.`);
   }
   if (draftHasChanges(path)) {
-    cmdSave(args);
+    commitDraftChanges(path, slug, rest);
   }
   const lintResult = lint(path, { spec: "folio" });
   printLintResult(lintResult);
   if (hasLintErrors(lintResult)) {
-    throw new Error(`Lint found issues in '${slug}'. Fix them, 'folio save ${slug}', then re-run 'folio proof ${slug}'.`);
+    throw new Error(`Lint found issues in '${slug}'. Fix them, then re-run 'folio proof ${slug}'.`);
   }
   console.log(`Rebasing '${branch}' onto main...`);
   const rebase = run(`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`);
@@ -1749,9 +1756,6 @@ function cmdPublish(args) {
   if (!branch || branch === "?") {
     throw new Error(`Draft '${slug}' is not on a branch.`);
   }
-  if (draftHasChanges(path)) {
-    throw new Error(`Draft '${slug}' has unsaved changes. Run 'folio save ${slug}' then 'folio proof ${slug}' first.`);
-  }
   if (local) {
     const merge2 = withMainLock(() => run(`git -C "${baseRepo()}" merge "${branch}" --no-edit --quiet 2>&1`));
     if (merge2.exitCode !== 0) {
@@ -1764,11 +1768,6 @@ function cmdPublish(args) {
   const prNum = findOpenPR(remote, branch);
   if (!prNum) {
     throw new Error(`No open PR for '${slug}'. Run 'folio proof ${slug}' first to send it for review.`);
-  }
-  const isDraft = gh(`pr view ${prNum} --json isDraft --jq .isDraft`, remote).stdout;
-  if (isDraft === "true") {
-    console.log(`PR #${prNum} is still a draft — review it on GitHub and mark it ready, then run 'folio publish ${slug}'.`);
-    return;
   }
   const merge = run(`gh pr merge --repo "${remote}" ${prNum} --squash --delete-branch 2>&1`);
   if (merge.exitCode !== 0) {
@@ -2078,9 +2077,8 @@ Usage:
   folio bind <path>                Bind to a local git repo, in place
   folio create <path>              Scaffold a new folio and bind to it
   folio draft <topic>              Start or resume a draft (--force to restart)
-  folio save <topic> [-m "msg"]    Save changes in a draft
-  folio proof <topic>              Lint + rebase; push + open draft PR (pr) or show diff (local)
-  folio publish <topic>            Merge the draft into main (pr: only once PR is ready)
+  folio proof <topic>              Commit dirty work, lint, rebase; push + open draft PR (pr) or show diff (local)
+  folio publish <topic>            Merge the draft into main
   folio status [-u]                Fleet dashboard: every draft's state; -u fast-forwards main
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
@@ -2095,14 +2093,13 @@ Usage:
   folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
-Flow: draft <topic> → edit → save <topic> → proof <topic> → publish <topic>.
+Flow: draft <topic> → edit → proof <topic> → publish <topic>.
 
 Every draft verb resolves its topic as: explicit argument, then
 $FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
 passing the topic explicitly. Chain steps with && (e.g. folio draft my-topic
-&& ... && folio save my-topic -m "..." && folio proof my-topic) — verbs stay
-single-purpose.
+&& ... && folio proof my-topic) — verbs stay single-purpose.
 `);
   process.exit(0);
 }
@@ -2122,9 +2119,6 @@ try {
       break;
     case "draft":
       cmdDraft(args);
-      break;
-    case "save":
-      cmdSave(args);
       break;
     case "proof":
       cmdProof(args);
