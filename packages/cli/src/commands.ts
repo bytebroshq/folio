@@ -760,9 +760,21 @@ export function cmdProof(args: string[]): void {
 		return;
 	}
 
+	// A fresh draft has no origin/<branch> tracking ref yet. Assert that the
+	// remote ref is absent for its first lease-protected push, then record the
+	// upstream so later pushes use Git's normal tracking-ref lease.
+	const hasRemoteTracking =
+		run(
+			`git -C "${path}" show-ref --verify --quiet "refs/remotes/origin/${branch}"`,
+			{ quiet: true },
+		).exitCode === 0;
+	const lease = hasRemoteTracking
+		? "--force-with-lease"
+		: `--force-with-lease=refs/heads/${branch}:`;
+
 	// Force-push and create/update the draft PR.
 	const push = run(
-		`git -C "${path}" push --force-with-lease origin "${branch}" --quiet 2>&1`,
+		`git -C "${path}" push --set-upstream ${lease} origin "${branch}" --quiet 2>&1`,
 	);
 	if (push.exitCode !== 0) {
 		throw new Error("Push failed. Check network and access.");

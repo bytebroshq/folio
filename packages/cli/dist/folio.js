@@ -1755,7 +1755,9 @@ function cmdProof(args) {
     console.log(`Run 'folio publish ${slug}' when ready.`);
     return;
   }
-  const push = run(`git -C "${path}" push --force-with-lease origin "${branch}" --quiet 2>&1`);
+  const hasRemoteTracking = run(`git -C "${path}" show-ref --verify --quiet "refs/remotes/origin/${branch}"`, { quiet: true }).exitCode === 0;
+  const lease = hasRemoteTracking ? "--force-with-lease" : `--force-with-lease=refs/heads/${branch}:`;
+  const push = run(`git -C "${path}" push --set-upstream ${lease} origin "${branch}" --quiet 2>&1`);
   if (push.exitCode !== 0) {
     throw new Error("Push failed. Check network and access.");
   }
