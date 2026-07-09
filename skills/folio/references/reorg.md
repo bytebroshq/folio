@@ -38,10 +38,10 @@ Signals a topic's leaves have drifted:
 5. Update `INDEX.md`: remove deleted leaves, reframe descriptions of changed
    ones.
 6. Fix all inbound wikilinks to deleted/renamed leaves.
-7. Save and validate: `folio save -m "..."` then `folio proof`, or commit and
-   run the manual lint checklist (`references/linting.md`). Lint must be
-   clean — broken links, stale index entries, and orphans are the common
-   reorg failures.
+7. Validate the draft: `folio proof <topic-reorg>`, or commit manually and run
+   the manual lint checklist (`references/linting.md`). Lint must be clean —
+   broken links, stale index entries, and orphans are the common reorg
+   failures.
 8. The draft PR stays draft; a human marks it ready. Never run `gh pr ready`.
 
 ## Stale-framing sweep

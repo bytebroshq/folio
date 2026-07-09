@@ -466,16 +466,13 @@ export function cmdDraft(args: string[]): void {
 	console.log(`✓ Draft '${slug}' created.`);
 	console.log(`  store: ${path}/`);
 	console.log(`  next:  edit leaves in the store, then`);
-	console.log(
-		`         folio save ${topic} -m "..." && folio proof ${topic}`,
-	);
+	console.log(`         folio proof ${topic}`);
 }
 
 // ── shared draft helpers ─────────────────────────────────────────────
 
 /** Usage examples shown in resolveDraft's "no topic" error, per verb. */
 const VERB_EXAMPLES: Record<string, string> = {
-	save: `folio save <topic> -m "..."`,
 	proof: "folio proof <topic>",
 	publish: "folio publish <topic>",
 	drop: "folio drop <topic> --force",
@@ -625,21 +622,13 @@ function withMainLock<T>(fn: () => T): T {
 	}
 }
 
-// ── save ───────────────────────────────────────────────────────────
+// ── proof ──────────────────────────────────────────────────────────
 
-export function cmdSave(args: string[]): void {
-	ensureConfig();
-	const { slug, path, rest } = resolveDraft("save", args, ["-m"]);
-
+function commitDraftChanges(path: string, slug: string, rest: string[]): void {
 	let msg = `amend: ${slug}`;
 	const mIdx = rest.indexOf("-m");
 	if (mIdx >= 0 && mIdx + 1 < rest.length) {
 		msg = rest[mIdx + 1] as string;
-	}
-
-	if (!draftHasChanges(path)) {
-		console.log(`Nothing to save in '${slug}'.`);
-		return;
 	}
 
 	run(`git -C "${path}" add -A`);
@@ -647,12 +636,9 @@ export function cmdSave(args: string[]): void {
 		`git -C "${path}" commit -m "${msg.replace(/"/g, '\\"')}" --quiet`,
 	);
 	if (commit.exitCode !== 0) {
-		throw new Error(`Save failed: ${commit.stderr}`);
+		throw new Error(`Commit failed: ${commit.stderr || commit.stdout}`);
 	}
-	console.log(`Saved: ${msg}`);
 }
-
-// ── proof ──────────────────────────────────────────────────────────
 
 export function cmdProof(args: string[]): void {
 	ensureConfig();
@@ -660,23 +646,21 @@ export function cmdProof(args: string[]): void {
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { slug, path } = resolveDraft("proof", args);
+	const { slug, path, rest } = resolveDraft("proof", args, ["-m"]);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
 		throw new Error(`Draft '${slug}' is not on a branch.`);
 	}
 
-	// Auto-save so proof always reviews the latest edits.
 	if (draftHasChanges(path)) {
-		cmdSave(args);
+		commitDraftChanges(path, slug, rest);
 	}
 
-	// Lint before rebase/publish — proof is the mechanical gate.
 	const lintResult = lint(path, { spec: "folio" });
 	printLintResult(lintResult);
 	if (hasLintErrors(lintResult)) {
 		throw new Error(
-			`Lint found issues in '${slug}'. Fix them, 'folio save ${slug}', then re-run 'folio proof ${slug}'.`,
+			`Lint found issues in '${slug}'. Fix them, then re-run 'folio proof ${slug}'.`,
 		);
 	}
 
@@ -761,12 +745,6 @@ export function cmdPublish(args: string[]): void {
 		throw new Error(`Draft '${slug}' is not on a branch.`);
 	}
 
-	if (draftHasChanges(path)) {
-		throw new Error(
-			`Draft '${slug}' has unsaved changes. Run 'folio save ${slug}' then 'folio proof ${slug}' first.`,
-		);
-	}
-
 	if (local) {
 		// Merge-strategy publish mutates the shared base repo's main branch —
 		// serialize with status -u under the coarse lock.
@@ -786,17 +764,6 @@ export function cmdPublish(args: string[]): void {
 		throw new Error(
 			`No open PR for '${slug}'. Run 'folio proof ${slug}' first to send it for review.`,
 		);
-	}
-
-	const isDraft = gh(
-		`pr view ${prNum} --json isDraft --jq .isDraft`,
-		remote,
-	).stdout;
-	if (isDraft === "true") {
-		console.log(
-			`PR #${prNum} is still a draft — review it on GitHub and mark it ready, then run 'folio publish ${slug}'.`,
-		);
-		return;
 	}
 
 	const merge = run(
@@ -1172,7 +1139,7 @@ export function cmdList(): void {
  * lint's target resolves the same way a draft verb's does — explicit topic
  * argument, then $FOLIO_DRAFT — but falls back to main instead of erroring
  * when neither is set, since "lint what's bound" is a meaningful default
- * (unlike save/proof/publish, which are meaningless without a draft).
+ * (unlike proof/publish, which are meaningless without a draft).
  */
 export function cmdLint(args: string[]): void {
 	ensureConfig();

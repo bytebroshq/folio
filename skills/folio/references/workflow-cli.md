@@ -5,18 +5,32 @@ When the `folio` CLI is installed, the ritual is:
 ```bash
 folio draft cubby-org-model                                  # opens a draft worktree on amend/cubby-org-model
 # edit leaves in the worktree; keep the delta small and topical
-folio save cubby-org-model -m "..." && folio proof cubby-org-model
+folio proof cubby-org-model
 # a human reviews and marks the PR ready on GitHub
 folio publish cubby-org-model                                 # squash-merges after human approval; cleans up the branch
 ```
 
-Every draft verb — `save`, `proof`, `publish`, `drop`, `lint` — takes its
-topic explicitly. This is what makes concurrent drafts safe: nothing is
-shared between processes, so one agent's draft can never be hijacked by
-another's. Chain steps with `&&`, naming the topic once per command; verbs
-stay single-purpose (`proof` saves any pending edits in the worktree it's
-already given before it lints, but there's no combined "save and publish"
+Every draft verb — `proof`, `publish`, `drop`, `lint` — takes its topic
+explicitly. This is what makes concurrent drafts safe: nothing is shared
+between processes, so one agent's draft can never be hijacked by another's.
+Chain steps with `&&`, naming the topic once per command; verbs stay
+single-purpose (`proof` commits any pending edits in the worktree it's
+already given before it lints, but there's no combined "commit and publish"
 verb — publish still requires its own explicit run).
+
+## Verb ownership
+
+- `draft` opens or resumes an isolated amendment worktree for one topic.
+- `proof` owns review prep: commit pending edits, lint, rebase, then push and
+  open or update a draft PR for `strategy: pr`, or show the rebased diff for
+  `strategy: merge`.
+- `publish` owns landing only: check currency, attempt the merge, translate
+  failures, and clean up after success. It does not commit dirty edits, mark a
+  PR ready, batch drafts, or publish all topics.
+- `lint` is standalone inspection or preflight. It is useful before work starts,
+  but `proof` runs lint again over the committed, rebased draft.
+- `drop` deletes the draft branch and worktree. Treat it as destructive; use it
+  only when explicitly requested.
 
 ## FOLIO_DRAFT
 
@@ -25,7 +39,7 @@ A script or hook that wraps the whole ritual in one process can set
 
 ```bash
 export FOLIO_DRAFT=cubby-org-model
-folio save -m "..." && folio proof
+folio proof
 ```
 
 Resolution order: explicit argument, then `$FOLIO_DRAFT`, then an error
@@ -42,8 +56,8 @@ command self-documents the transcript.
 
 ## Multiplayer semantics
 
-Drafts are independent worktrees; multiple agents can draft, save, and
-proof concurrently without interfering. `proof` rebases onto the default
+Drafts are independent worktrees; multiple agents can draft and proof
+concurrently without interfering. `proof` rebases onto the default
 branch each time, so publish order across drafts doesn't matter — when one
 draft lands, the others simply re-proof against the new default branch. A
 rebase conflict touching the same leaf surfaces to exactly one agent, with

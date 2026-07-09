@@ -118,14 +118,14 @@ Edit files here:
 ~/.config/folio/stores/amendments/my-topic/
 ```
 
-Every draft verb — `save`, `proof`, `publish`, `drop`, `lint` — takes the
-topic explicitly. This is what makes concurrent drafts safe: each process
-names its own draft, so one agent's `save` can never land in another
-agent's worktree. Resolution order is: explicit argument, then
-`$FOLIO_DRAFT`, then an error. Set `FOLIO_DRAFT` once in a script or hook
-that wraps the whole ritual in a single process; interactive agents should
-keep passing the topic explicitly — env doesn't survive between tool
-calls, and the topic in the command self-documents the transcript.
+Every draft verb — `proof`, `publish`, `drop`, `lint` — takes the topic
+explicitly. This is what makes concurrent drafts safe: each process names
+its own draft, so one agent's work can never land in another agent's
+worktree. Resolution order is: explicit argument, then `$FOLIO_DRAFT`,
+then an error. Set `FOLIO_DRAFT` once in a script or hook that wraps the
+whole ritual in a single process; interactive agents should keep passing
+the topic explicitly — env doesn't survive between tool calls, and the
+topic in the command self-documents the transcript.
 
 Check state:
 
@@ -165,12 +165,12 @@ No drafts
 Bound to /path/to/local-folio
 ```
 
-Save, then proof — lints, rebases, and (pr strategy) pushes + opens or
-updates the draft PR; under merge strategy it shows the diff vs main.
-Chain them with `&&`, naming the topic once:
+Proof — commits dirty work, then lints, rebases, and (pr strategy) pushes
+and opens or updates the draft PR; under merge strategy it shows the diff
+vs main. Chain them with `&&`, naming the topic once:
 
 ```bash
-folio save my-topic -m "describe the change" && folio proof my-topic
+folio proof my-topic
 ```
 
 Publish — merges into main (pr strategy: only once the PR is marked ready):
@@ -200,9 +200,8 @@ folio bind <path>                    bind in place to a local git repo
 folio bind ... --remote|--local      force how an ambiguous target is read
 folio create <path>                  scaffold a new folio and bind to it
 folio draft <topic>                  start or resume a draft (--force to restart)
-folio save <topic> [-m "message"]    save changes in a draft
-folio proof <topic>                  lint + rebase; push + draft PR (pr) or show diff (merge)
-folio publish <topic>                merge the draft into main (pr: only once PR is ready)
+folio proof <topic>                  commit dirty work, lint, rebase; push + draft PR (pr) or show diff (merge)
+folio publish <topic>                merge the draft into main
 folio status [-u]                    fleet dashboard: every draft's state; -u fast-forwards main
 folio list                           list drafts
 folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
