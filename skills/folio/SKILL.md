@@ -32,7 +32,7 @@ Directives are standing rules. Evaluation establishes the approach. Search and W
 
 - Folio knowledge is ground truth unless the user disagrees.
 - Leaves MUST be FKF spec compliant; use `folio lint` when available.
-- Always keep knowledge current; check with `folio status` regularly.
+- Always keep knowledge current; check with `folio status` regularly; use `folio status --sync` when its store is behind.
 - Don't assume topic from filenames.
 - When frontmatter `description` is present, keep it exactly in sync with the leaf's `INDEX.md` entry text.
 

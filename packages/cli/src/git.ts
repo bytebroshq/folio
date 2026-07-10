@@ -122,7 +122,7 @@ export function currentBranch(): string {
 export function behindCount(): number {
 	if (!hasRemote()) return 0;
 	const result = run(
-		`git -C "${baseRepo()}" rev-list --count HEAD..origin/main 2>/dev/null || echo 0`,
+		`git -C "${baseRepo()}" rev-list --count main..origin/main 2>/dev/null || echo 0`,
 		{ quiet: true },
 	);
 	return Number.parseInt(result.stdout || "0", 10);
