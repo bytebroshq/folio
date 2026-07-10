@@ -1,90 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# folio CLI install script
+# folio CLI installer. Installs an immutable GitHub Release artifact.
 #   curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
-#
-# Custom bin dir:
-#   FOLIO_BIN_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+# Pin a release with FOLIO_VERSION=vX.Y.Z.
 
 REPO="bytebroshq/folio"
-BRANCH="main"
 BIN_DIR="${FOLIO_BIN_DIR:-$HOME/.local/bin}"
 TARGET="$BIN_DIR/folio"
+VERSION="${FOLIO_VERSION:-}"
 
-detect_rc() {
-  case "${SHELL:-}" in
-    */zsh) echo "$HOME/.zshrc" ;;
-    */bash) echo "$HOME/.bashrc" ;;
-    *) return 1 ;;
-  esac
-}
+api_url="https://api.github.com/repos/$REPO/releases/latest"
+if [[ -n "$VERSION" ]]; then
+  [[ "$VERSION" == v* ]] || VERSION="v$VERSION"
+  api_url="https://api.github.com/repos/$REPO/releases/tags/$VERSION"
+fi
 
-path_contains() {
-  case ":$PATH:" in
-    *":$1:"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+command -v node >/dev/null || { echo "folio: Node.js v22+ is required."; exit 1; }
+release="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api_url")" || { echo "folio: could not find the requested stable release."; exit 1; }
+metadata="$(node -e '
+let r="";process.stdin.on("data",c=>r+=c).on("end",()=>{const x=JSON.parse(r);const asset=n=>x.assets.find(a=>a.name===n)?.browser_download_url;if(x.draft||x.prerelease||!asset("folio.js")||!asset("SHA256SUMS"))process.exit(1);console.log(x.tag_name);console.log(asset("folio.js"));console.log(asset("SHA256SUMS"));})
+' <<<"$release")" || { echo "folio: release is missing required assets."; exit 1; }
+TAG="$(printf '%s\n' "$metadata" | sed -n '1p')"
+ASSET_URL="$(printf '%s\n' "$metadata" | sed -n '2p')"
+SUMS_URL="$(printf '%s\n' "$metadata" | sed -n '3p')"
 
-quote_for_rc() {
-  if [[ "$1" == "$HOME"* ]]; then
-    printf '$HOME%s' "${1#"$HOME"}"
-  else
-    printf '%s' "$1"
-  fi
-}
-
-echo "folio: installing to $TARGET"
 mkdir -p "$BIN_DIR"
+tmp="$(mktemp "$BIN_DIR/.folio.XXXXXX")"
+sums="$(mktemp "$BIN_DIR/.folio-sums.XXXXXX")"
+trap 'rm -f "$tmp" "$sums"' EXIT
+curl -fsSL "$ASSET_URL" -o "$tmp"
+curl -fsSL "$SUMS_URL" -o "$sums"
+expected="$(awk '$2 == "folio.js" { print $1 }' "$sums")"
+[[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo "folio: invalid SHA256SUMS release asset."; exit 1; }
+if command -v sha256sum >/dev/null; then actual="$(sha256sum "$tmp" | awk '{print $1}')"; else actual="$(shasum -a 256 "$tmp" | awk '{print $1}')"; fi
+[[ "$actual" == "$expected" ]] || { echo "folio: checksum verification failed."; exit 1; }
+chmod +x "$tmp"
+mv -f "$tmp" "$TARGET"
+printf 'folio %s installed at %s\n' "$TAG" "$TARGET"
 
-# Check for Node.js
-if ! command -v node &> /dev/null; then
-  echo "folio: Node.js is required but not found."
-  echo "       Install from https://nodejs.org (v22+) and re-run this script."
-  exit 1
-fi
-
-# Download pre-built JS directly as the executable. It has a Node shebang,
-# so normal invocations do not go through a bash wrapper.
-echo "folio: downloading..."
-curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/packages/cli/dist/folio.js" -o "$TARGET"
-chmod +x "$TARGET"
-
-# Ensure on PATH
-if path_contains "$BIN_DIR"; then
-  echo "folio: installed and available on PATH"
-else
-  rc="$(detect_rc || true)"
-  rc_path="$(quote_for_rc "$BIN_DIR")"
-  if [[ -n "$rc" ]] && ! grep -Fq "$BIN_DIR" "$rc" 2>/dev/null && ! grep -Fq "$rc_path" "$rc" 2>/dev/null; then
-    echo "" >> "$rc"
-    echo "export PATH=\"$rc_path:\$PATH\"" >> "$rc"
-    echo "folio: added $rc_path to PATH in $rc"
-  else
-    echo "folio: installed, but $BIN_DIR is not on PATH"
-  fi
-  echo ""
-  echo "To use folio in this terminal now, run:"
-  echo ""
-  echo "  export PATH=\"$rc_path:\$PATH\""
-  echo ""
-  echo "Or open a new terminal."
-fi
-
-echo ""
-echo "folio installed. Next step:"
-echo ""
-echo "  folio bind <ns/repo>   # bind to a knowledge repo (one-time setup)"
-echo "  folio status            # then check state anytime"
-echo ""
-echo "Commands:"
-echo "  folio bind <ns/repo> [--web]        # bind to a knowledge repo"
-echo "  folio draft <topic>                 # start or resume a draft"
-echo "  folio proof <topic>                 # commit dirty work, lint, rebase, open/update draft PR"
-echo "  folio publish <topic>               # merge the draft in (once PR is ready)"
-echo "  folio list                          # list all amendments"
-echo "  folio status                        # fleet dashboard — current state"
-echo "  folio web                           # open review surface"
-echo "  folio config                        # show/set config"
-echo ""
+case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "folio: add $BIN_DIR to PATH to use it.";; esac
