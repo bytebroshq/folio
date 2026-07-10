@@ -1,85 +1,43 @@
-# Folio draft workflow — CLI
+# CLI draft workflow
 
-When the `folio` CLI is installed, the ritual is:
+## Non-negotiable boundary
 
-```bash
-folio draft cubby-org-model                                  # opens a draft worktree on amend/cubby-org-model
-# edit leaves in the worktree; keep the delta small and topical
-folio proof cubby-org-model
-# a human reviews and marks the PR ready on GitHub
-folio publish cubby-org-model                                 # squash-merges after human approval; cleans up the branch
-```
+- The bound checkout is the base store; it stays on `main`. Otherwise, surface to user.
+- Edit only the amendment worktree created by `folio draft`.
 
-Every draft verb — `proof`, `publish`, `drop`, `lint` — takes its topic
-explicitly. This is what makes concurrent drafts safe: nothing is shared
-between processes, so one agent's draft can never be hijacked by another's.
-Chain steps with `&&`, naming the topic once per command; verbs stay
-single-purpose (`proof` commits any pending edits in the worktree it's
-already given before it lints, but there's no combined "commit and publish"
-verb — publish still requires its own explicit run).
+## Prefer Folio to Git
 
-## Verb ownership
+Use the Folio CLI for Folio work. Its verbs already own the Git steps:
 
-- `draft` opens or resumes an isolated amendment worktree for one topic.
-- `proof` owns review prep: commit pending edits, or adopt a remote-only
-  draft when the local worktree is missing, then lint, rebase, and push with
-  `--force-with-lease`; for `strategy: pr` it opens or updates a draft PR, and
-  for `strategy: merge` it shows the rebased diff.
-- `publish` owns landing only: check currency, attempt the merge, translate
-  failures, and clean up after success. It does not commit dirty edits, mark a
-  PR ready, batch drafts, or publish all topics.
-- `lint` is standalone inspection or preflight. It is useful before work starts,
-  but `proof` runs lint again over the committed, rebased draft.
-- `drop` deletes the draft branch and worktree. Treat it as destructive; use it
-  only when explicitly requested.
+- `draft` creates or resumes the isolated worktree.
+- `proof` commits pending edits, lints, rebases, and pushes or shows the diff.
+- `publish` lands reviewed work and cleans up.
+- `drop` deletes the draft branch and worktree.
+- `status` reports the bound store and every draft.
+- `status --sync` fetches, fast-forwards the bound store when needed, and reports state; use it before drafting.
 
-## FOLIO_DRAFT
+Use these verbs instead of recreating their steps with Git. Reach for Git only when the user requests the manual workflow, no Folio verb covers the job, or the CLI fails.
 
-A script or hook that wraps the whole ritual in one process can set
-`FOLIO_DRAFT` once instead of repeating the topic every call:
+## Draft lifecycle
 
-```bash
-export FOLIO_DRAFT=cubby-org-model
-folio proof
-```
+1. Run `folio status --sync` to bring the store current and orient to its state and existing drafts.
+2. Run `folio draft <topic>`.
+3. Edit only `~/.config/folio/stores/amendments/<topic>/`.
+4. Run `folio proof <topic>`.
+5. With `strategy: pr`, wait for human review and ready status.
+6. Run `folio publish <topic>`.
+7. Run `folio status` to confirm the resulting state.
 
-Resolution order: explicit argument, then `$FOLIO_DRAFT`, then an error
-that names the fix. Interactive agents should keep passing the topic
-explicitly — env doesn't survive between tool calls, and the topic in the
-command self-documents the transcript.
+## Conditions
 
-## Strategy
-
-`folio config` reports the binding as three keys: `remote` (owner/repo, if GitHub-backed), `path` (where the checkout lives), and `strategy` — which names what `publish` does.
-
-- **`strategy: pr`** — `proof` pushes the `amend/` branch and opens or updates a draft PR. `publish` squash-merges into the default branch.
-- **`strategy: merge`** — no PR. `proof` lints, rebases onto the default branch, and shows the diff. `publish` squash-merges when the human says so.
-
-## Multiplayer semantics
-
-Drafts are independent worktrees; multiple agents can draft and proof
-concurrently without interfering. `proof` rebases onto the default
-branch each time, so publish order across drafts doesn't matter — when one
-draft lands, the others simply re-proof against the new default branch. A
-rebase conflict touching the same leaf surfaces to exactly one agent, with
-the worktree path to resolve it in.
+- Pass the topic explicitly for interactive work.
+- With `strategy: pr`, `proof` opens or updates a draft PR. A human marks it ready before `publish` squash-merges it.
+- With `strategy: merge`, `proof` shows the rebased diff and `publish` squash-merges locally.
+- `folio drop <topic> --force` deletes a draft branch and worktree.
 
 ## Rules
 
-- The merged default branch is published truth. Never push to it directly.
-- Folio drafts are pending knowledge; surface them as pending, don't adopt them silently as truth.
-- One coherent change per draft; keep deltas small and topical.
-- **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
-- Squash-merge on publish, preserving the PR title/body with `(#N)` in the subject.
-
-## Abandon
-
-```bash
-folio drop cubby-org-model --force   # deletes the amend/ branch and worktree
-```
-
-## After merge
-
-```bash
-folio status            # fleet dashboard: every open draft, plus the default branch's state
-```
+- Never push directly to the default branch.
+- Never mark a draft PR ready.
+- Keep one coherent change per draft.
+- Treat drafts as pending knowledge, not published truth.
