@@ -1,6 +1,6 @@
 ---
 name: folio
-description: Use when reading, querying, writing, or maintaining Folio knowledgebase pages — concise Markdown context, decisions, rationale, constraints, cross-repo context, filing a decision, or getting oriented in a Folio repo. The folio CLI, when installed, is the fast path — chainable verbs from draft to publish; manual git works too.
+description: Use this skill before answering from assumption when project context, decisions, rationale, or cross-repo constraints might already be documented. A bound folio is a curated, concise knowledgebase of durable Markdown leaves. Use it to get oriented, file decisions, or capture lasting context.
 metadata:
   folio-cli-version: 0.3.2
 ---
@@ -33,13 +33,14 @@ Folio is a Markdown knowledge format: linked leaves with a few strict convention
 
 Start here to establish a strategy moving forward.
 
-1. Check for CLI installation.
+1. Read the bound block's README.md (and INDEX.md if needed for orientation) to understand what this repo is — a block contains Markdown leaves, not tooling. Never infer a repo's purpose from its name or `gh` output alone.
+2. Check for CLI installation.
    - **Installed** — compare `folio --version` to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
    - **Not installed** — the manual workflow is the default path. The CLI is optional and unlocks the CLI workflow:
      ```bash
      curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
      ```
-2. Ground in the bound block: read its `INDEX.md` — the topic map — as soon
+3. Ground in the bound block: read its `INDEX.md` — the topic map — as soon
    as this skill fires, not only once a leaf search begins. This skill's own
    `description` may carry a "Bound folio: ..." scent stamped from that
    INDEX's frontmatter; the live file, not the stamp, is ground truth for
