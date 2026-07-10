@@ -54,7 +54,7 @@ Usage:
   folio lint --spec folio          Check with an explicit lint spec
   folio lint --json                Machine-readable output
   folio lint --strict              Exit 1 if any errors
-  folio skill install [path]       Write the embedded folio skill into [path] (remembers it; re-run bare to refresh)
+  folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits bound block context)
 
 Edits go in ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft <topic> → edit → proof <topic> → publish <topic>.
@@ -115,7 +115,7 @@ try {
 			cmdLint(args);
 			break;
 		case "skill":
-			cmdSkill(args);
+			await cmdSkill(args, pkg.version);
 			break;
 		case undefined:
 		case "-h":

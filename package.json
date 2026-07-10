@@ -5,14 +5,14 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*",
-    "skills/*"
+    "apps/*"
   ],
   "scripts": {
     "dev": "bun run --filter @folio/web dev",
     "deploy": "bun run --filter @folio/web deploy",
     "types": "bun run --filter @folio/web types",
     "format": "bunx @biomejs/biome check --write",
-    "lint": "bunx @biomejs/biome check"
+    "lint": "bunx @biomejs/biome check",
+    "verify-release": "bun run scripts/verify-release.ts"
   }
 }

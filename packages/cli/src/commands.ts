@@ -1,16 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	statSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
 	AMEND_DIR,
@@ -48,14 +52,17 @@ import {
 	worktreeExists,
 } from "./git";
 import { openBrowser } from "./open";
-import { updateCli } from "./release";
-import { skillBundle } from "./skill-bundle.gen";
 import {
-	extractScent,
+	downloadReleaseAsset,
+	getRelease,
+	SKILL_ASSET,
+	updateCli,
+} from "./release";
+import {
+	enrichDescription,
+	enrichSkillFile,
 	readIndexDescription,
-	readSkillDescription,
-	restampSkillFile,
-} from "./skill-scent";
+} from "./skill-enrichment";
 
 // ── Formatting helpers ──────────────────────────────────────────────
 
@@ -136,27 +143,6 @@ function detachCurrent(): void {
 	}
 }
 
-/**
- * After a successful bind, refresh the installed skill's scent from the
- * newly bound block's INDEX — only if a skill was ever installed (the
- * `skill` config key is set) and its SKILL.md still exists there. Never
- * fails the bind: any error is swallowed with a warning at most.
- */
-function restampBoundSkill(): void {
-	const skillDir = readConfig("skill");
-	if (!skillDir) return;
-
-	const skillPath = join(skillDir, "SKILL.md");
-	if (!existsSync(skillPath)) return;
-
-	try {
-		restampSkillFile(skillPath, baseRepo());
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		console.log(`  (couldn't refresh skill description: ${msg})`);
-	}
-}
-
 function bindLocal(path: string, force: boolean): void {
 	const abs = resolvePath(path);
 
@@ -188,6 +174,7 @@ function bindLocal(path: string, force: boolean): void {
 	ensureBase();
 
 	console.log(`✓ Bound to ${abs} (local).`);
+	refreshInstalledSkillEnrichment();
 
 	// Promotion nudge: a GitHub origin can review via draft PRs instead.
 	const origin = parseGitHubOrigin(abs);
@@ -196,8 +183,6 @@ function bindLocal(path: string, force: boolean): void {
 			`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`,
 		);
 	}
-
-	restampBoundSkill();
 }
 
 /** Verify SSH access to a GitHub repo before any state changes. */
@@ -251,7 +236,7 @@ function bindRemote(remote: string, force: boolean): void {
 	if (ff.stdout) console.log(`  ${ff.stdout}`);
 
 	console.log(`✓ Bound to ${remote}.`);
-	restampBoundSkill();
+	refreshInstalledSkillEnrichment();
 }
 
 /** Bind a GitHub remote, cloning the checkout into a user-chosen path. */
@@ -288,7 +273,7 @@ function bindRemoteInto(remote: string, path: string, force: boolean): void {
 	writeConfig("source", "");
 
 	console.log(`✓ Bound to ${remote} at ${abs}.`);
-	restampBoundSkill();
+	refreshInstalledSkillEnrichment();
 }
 
 export function cmdBind(args: string[]): void {
@@ -1048,25 +1033,6 @@ export function cmdDrop(args: string[]): void {
 // ── status ─────────────────────────────────────────────────────────
 
 /** `folio status` fetches in pr strategy so update guidance is fresh. */
-/**
- * Stateless drift check: does the installed skill's stamped scent still
- * match the bound block's live INDEX description? Silent when there's no
- * skill config key, no installed SKILL.md, or the two already agree.
- */
-function printSkillDrift(): void {
-	const skillDir = readConfig("skill");
-	if (!skillDir) return;
-
-	const skillPath = join(skillDir, "SKILL.md");
-	const current = readSkillDescription(skillPath);
-	if (current === undefined) return;
-
-	const installedScent = extractScent(current);
-	const liveScent = readIndexDescription(baseRepo());
-	if (installedScent === liveScent) return;
-
-	console.log("Skill description out of date, run `folio skill install`");
-}
 
 /**
  * A draft's one-line dashboard state: dirty (uncommitted changes), saved
@@ -1113,8 +1079,6 @@ export function cmdStatus(args: string[] = []): void {
 		);
 		return;
 	}
-
-	printSkillDrift();
 
 	const bound = boundPath ?? (remote as string);
 	const base = baseRepo();
@@ -1422,7 +1386,7 @@ export function cmdLint(args: string[]): void {
 
 // ── update ─────────────────────────────────────────────────────────
 
-/** Bring the installed CLI current; the replacement binary refreshes its own skill bundle. */
+/** Bring the installed CLI current, then refresh its matching skill archive. */
 export async function cmdUpdate(
 	args: string[],
 	currentVersion: string,
@@ -1461,16 +1425,24 @@ export async function cmdUpdate(
 // ── skill ──────────────────────────────────────────────────────────
 
 /**
- * Unpacks the skill bundle embedded at build time into <path>, then stamps
- * the written SKILL.md's frontmatter `description` with the bound block's
- * INDEX scent (SPEC.md §7), if any. Deliberately blind to any agent harness
- * beyond that one stamp — it just writes files.
- *
- * Bare `folio skill install` (no path) reuses the path recorded under the
- * `skill` config key from a prior install.
+ * Download the skill archive from the immutable release matching this CLI,
+ * then synchronize its files without touching unrelated directory files.
+ * Bare `folio skill install` reuses the path recorded under the `skill`
+ * config key from a prior install.
  */
 const SKILL_MANIFEST = ".folio-skill-manifest.json";
 type SkillManifest = { version: 1; files: Record<string, string> };
+
+function skillEnrichmentEnabled(): boolean {
+	return readConfig("skill-enrich") !== "false";
+}
+
+function refreshInstalledSkillEnrichment(): void {
+	if (!skillEnrichmentEnabled()) return;
+	const skillPath = readConfig("skill");
+	if (!skillPath) return;
+	enrichSkillFile(join(resolvePath(skillPath), "SKILL.md"), baseRepo());
+}
 
 function digest(content: string): string {
 	return createHash("sha256").update(content).digest("hex");
@@ -1490,9 +1462,63 @@ function readSkillManifest(path: string): SkillManifest | null {
 	}
 }
 
-/** Synchronize the embedded skill without touching unrelated directory files. */
-export function skillInstall(target: string | undefined): void {
+type SkillFile = { content: string; mode: number };
+
+function readSkillArchive(archive: Buffer): Record<string, SkillFile> {
+	const temp = mkdtempSync(join(tmpdir(), "folio-skill-"));
+	const archivePath = join(temp, "folio-skill.tar.gz");
+	const unpacked = join(temp, "unpacked");
+	try {
+		writeFileSync(archivePath, archive);
+		const listing = spawnSync("tar", ["-tzf", archivePath], {
+			encoding: "utf-8",
+		});
+		if (listing.status !== 0)
+			throw new Error(`Could not inspect skill archive: ${listing.stderr}`);
+		for (const entry of listing.stdout.split("\n")) {
+			const path = entry.replace(/^\.\//, "").replace(/\/$/, "");
+			if (!path) continue;
+			if (path.startsWith("/") || path.split("/").includes(".."))
+				throw new Error("Skill archive contains an unsafe path.");
+		}
+		mkdirSync(unpacked);
+		const extracted = spawnSync("tar", ["-xzf", archivePath, "-C", unpacked], {
+			encoding: "utf-8",
+		});
+		if (extracted.status !== 0)
+			throw new Error(`Could not unpack skill archive: ${extracted.stderr}`);
+
+		const files: Record<string, SkillFile> = {};
+		const visit = (dir: string): void => {
+			for (const entry of readdirSync(dir)) {
+				const source = join(dir, entry);
+				const stat = statSync(source);
+				if (stat.isDirectory()) visit(source);
+				else if (stat.isFile()) {
+					const path = relative(unpacked, source);
+					files[path] = {
+						content: readFileSync(source, "utf-8"),
+						mode: stat.mode & 0o777,
+					};
+				}
+			}
+		};
+		visit(unpacked);
+		if (!files["SKILL.md"])
+			throw new Error("Skill archive does not contain SKILL.md.");
+		return files;
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+}
+
+export async function skillInstall(
+	target: string | undefined,
+	currentVersion: string,
+	enrich: boolean | undefined = undefined,
+): Promise<void> {
 	ensureConfig();
+	if (enrich !== undefined) writeConfig("skill-enrich", String(enrich));
 	const recorded = readConfig("skill");
 	const resolvedTarget = target ?? recorded;
 	if (!resolvedTarget) {
@@ -1501,12 +1527,22 @@ export function skillInstall(target: string | undefined): void {
 		);
 	}
 
+	const release = await getRelease(currentVersion);
+	const archive = await downloadReleaseAsset(release, SKILL_ASSET);
+	const bundle = readSkillArchive(archive);
 	const abs = resolvePath(resolvedTarget);
-	const files = Object.keys(skillBundle).sort();
+	const files = Object.keys(bundle).sort();
+	const contents = Object.fromEntries(
+		files.map((rel) => [rel, (bundle[rel] as SkillFile).content]),
+	);
+	contents["SKILL.md"] = enrichDescription(
+		contents["SKILL.md"] as string,
+		skillEnrichmentEnabled() ? readIndexDescription(baseRepo()) : null,
+	);
 	const next: SkillManifest = {
 		version: 1,
 		files: Object.fromEntries(
-			files.map((rel) => [rel, digest(skillBundle[rel] as string)]),
+			files.map((rel) => [rel, digest(contents[rel] as string)]),
 		),
 	};
 	const previous = readSkillManifest(abs);
@@ -1530,28 +1566,41 @@ export function skillInstall(target: string | undefined): void {
 	for (const rel of files) {
 		const dest = join(abs, rel);
 		mkdirSync(dirname(dest), { recursive: true });
-		writeFileSync(dest, skillBundle[rel] as string, "utf-8");
+		const file = bundle[rel] as SkillFile;
+		writeFileSync(dest, contents[rel] as string, "utf-8");
+		chmodSync(dest, file.mode);
 		console.log(`wrote ${rel}`);
 	}
 
 	mkdirSync(abs, { recursive: true });
 	const manifest = join(abs, SKILL_MANIFEST);
-	const temp = `${manifest}.${process.pid}.tmp`;
-	writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
-	renameSync(temp, manifest);
+	const pending = `${manifest}.${process.pid}.tmp`;
+	writeFileSync(pending, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+	renameSync(pending, manifest);
 	writeConfig("skill", abs);
-	restampSkillFile(join(abs, "SKILL.md"), baseRepo());
 
 	console.log(`\n${files.length} file(s) synchronized to ${abs}`);
 }
 
-export function cmdSkill(args: string[]): void {
+export async function cmdSkill(
+	args: string[],
+	currentVersion: string,
+): Promise<void> {
 	const [sub, ...rest] = args;
 
 	if (sub === "install") {
-		skillInstall(rest[0]);
+		const noEnrich = rest.includes("--no-enrich");
+		const enrich = rest.includes("--enrich");
+		if (noEnrich && enrich)
+			throw new Error("--enrich and --no-enrich are mutually exclusive.");
+		const target = rest.find((arg) => !arg.startsWith("--"));
+		await skillInstall(
+			target,
+			currentVersion,
+			noEnrich ? false : enrich || undefined,
+		);
 		return;
 	}
 
-	throw new Error("Usage: folio skill install [path]");
+	throw new Error("Usage: folio skill install [path] [--enrich|--no-enrich]");
 }

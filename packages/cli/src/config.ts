@@ -16,7 +16,8 @@ export type ConfigKey =
 	| "source"
 	| "path"
 	| "strategy"
-	| "skill";
+	| "skill"
+	| "skill-enrich";
 
 /**
  * Read a config value, or the whole file when no key is given.

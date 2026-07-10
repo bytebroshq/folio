@@ -1,8 +1,6 @@
 ---
 name: folio
 description: Use this skill before answering from assumption when project context, decisions, rationale, or cross-repo constraints might already be documented. A bound folio is a curated, concise knowledgebase of durable Markdown leaves. Use it to get oriented, file decisions, or capture lasting context.
-metadata:
-  folio-cli-version: 0.3.3
 ---
 
 # Folio skill
@@ -39,7 +37,8 @@ Directives are standing rules. Evaluation establishes the approach. Search and W
 ### Evaluation
 
 1. Check for CLI installation.
-   - **Installed** — compare `folio --version` to the `folio-cli-version` stamp in this skill's frontmatter. On mismatch, defer to `folio --help` for current verbs; if available, `folio skill install` refreshes these files from the CLI's embedded copy.
+   - **Installed with `version.js` beside this file** — run `./version.js --is-cli-match`. On mismatch, defer to `folio --help` for current verbs; `folio skill install` fetches the matching release copy.
+   - **Installed without `version.js`** — use `folio --help` as the command reference. The skill remains usable without a version lock.
    - **Not installed** — the manual workflow is the default path. See the install script in Orientation.
 2. Establish the **Strategy** — decide: CLI-driven or manual. Stick with it unless the user explicitly requests a switch.
 

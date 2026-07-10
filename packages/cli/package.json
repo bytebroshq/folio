@@ -9,7 +9,8 @@
 	"main": "src/index.ts",
 	"types": "src/index.d.ts",
 	"scripts": {
-		"build": "bun run scripts/embed-skill.ts && bun build --target=node src/index.ts --outfile=dist/folio.js"
+		"build": "bun build --target=node src/index.ts --outfile=dist/folio.js",
+		"package-skill": "bun run scripts/package-skill.ts"
 	},
 	"dependencies": {
 		"@folio/core": "workspace:*"
