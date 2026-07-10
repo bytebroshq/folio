@@ -2,7 +2,6 @@
 node_modules/
 dist/
 client/dist/
-packages/cli/src/skill-bundle.gen.ts
 .dev.vars
 wrangler.toml
 *.log
