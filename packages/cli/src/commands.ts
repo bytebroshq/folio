@@ -1,8 +1,13 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
 	readdirSync,
+	readFileSync,
+	renameSync,
 	statSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -42,6 +47,7 @@ import {
 	worktreeExists,
 } from "./git";
 import { openBrowser } from "./open";
+import { updateCli } from "./release";
 import { skillBundle } from "./skill-bundle.gen";
 import {
 	extractScent,
@@ -642,7 +648,7 @@ function findOpenPRResult(
 // ── main-repo lock ───────────────────────────────────────────────────
 //
 // A coarse mutual-exclusion around the few ops that still mutate the
-// shared `.main` base repo in place — status -u's fast-forward and
+// shared `.main` base repo in place — sync's fast-forward and
 // merge-strategy publish. mkdir is atomic across processes, so it doubles
 // as the lock primitive; a lock older than the staleness timeout is
 // assumed abandoned (crashed process) and reclaimed. No daemon, no queue —
@@ -881,7 +887,7 @@ export function cmdPublish(args: string[]): void {
 	if (local) {
 		ensurePublishCurrency(slug, branch);
 		// Merge-strategy publish mutates the shared base repo's main branch —
-		// serialize with status -u under the coarse lock.
+		// serialize with sync under the coarse lock.
 		const merge = withMainLock(() =>
 			run(`git -C "${baseRepo()}" merge "${branch}" --squash --quiet 2>&1`),
 		);
@@ -931,7 +937,7 @@ export function cmdPublish(args: string[]): void {
 	console.log(`✓ Published '${slug}' — PR #${prNum} merged.`);
 
 	// Under pr strategy main follows origin — fast-forward the checkout.
-	// This mutates the shared base repo, same as status -u — under the lock.
+	// This mutates the shared base repo, same as sync — under the lock.
 	const ff = withMainLock(() =>
 		run(
 			`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`,
@@ -940,7 +946,7 @@ export function cmdPublish(args: string[]): void {
 	);
 	if (ff.exitCode !== 0) {
 		console.log(
-			"  (couldn't fast-forward main from origin — run 'folio status -u')",
+			"  (couldn't fast-forward main from origin — run 'folio sync')",
 		);
 	}
 
@@ -1105,7 +1111,7 @@ export function cmdStatus(args: string[] = []): void {
 
 	printSkillDrift();
 
-	const update = args.includes("-u") || args.includes("--update");
+	if (args.length > 0) throw new Error("Usage: folio status");
 	const bound = boundPath ?? (remote as string);
 	const base = baseRepo();
 
@@ -1139,20 +1145,7 @@ export function cmdStatus(args: string[] = []): void {
 	} else {
 		const behind = mainExists() ? behindCount() : 0;
 		if (behind > 0) {
-			if (update) {
-				// status -u fast-forwards the shared base repo — the same
-				// mutation publish (merge strategy) performs, so it takes the
-				// same lock.
-				const pull = withMainLock(() =>
-					run(`git -C "${base}" pull --ff-only origin main --quiet 2>&1`),
-				);
-				if (pull.exitCode !== 0) {
-					throw new Error(`Update failed: ${pull.stderr || pull.stdout}`);
-				}
-				console.log("Up to date");
-			} else {
-				console.log(`Needs update, run \`folio status -u\`${staleNote}`);
-			}
+			console.log(`Needs sync, run \`folio sync\`${staleNote}`);
 		} else {
 			console.log(`Up to date${staleNote}`);
 		}
@@ -1224,6 +1217,47 @@ export function cmdStatus(args: string[] = []): void {
 	}
 
 	printStatusFooter(bound, base);
+}
+
+// ── sync ───────────────────────────────────────────────────────────
+
+export function cmdSync(args: string[]): void {
+	if (args.some((arg) => arg !== "--yes"))
+		throw new Error("Usage: folio sync [--yes]");
+	ensureConfig();
+	ensureBase();
+	if (!hasRemote()) {
+		console.log("Bound to a local folio; there is no remote store to sync.");
+		return;
+	}
+	fetchMain();
+	const behind = behindCount();
+	if (behind === 0) {
+		console.log("Store is up to date.");
+		return;
+	}
+	if (!args.includes("--yes") && !process.stdin.isTTY) {
+		console.log(
+			`Store is ${behind} commit(s) behind. Re-run in a terminal or use --yes.`,
+		);
+		return;
+	}
+	if (!args.includes("--yes")) {
+		process.stdout.write(
+			`Store is ${behind} commit(s) behind. Fast-forward? [Y/n] `,
+		);
+		const answer = readFileSync(0, "utf-8").trim().toLowerCase();
+		if (answer === "n" || answer === "no") {
+			console.log("Sync not applied.");
+			return;
+		}
+	}
+	const pull = withMainLock(() =>
+		run(`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>&1`),
+	);
+	if (pull.exitCode !== 0)
+		throw new Error(`Sync failed: ${pull.stderr || pull.stdout}`);
+	console.log("Store is up to date.");
 }
 
 // ── config command ────────────────────────────────────────────────
@@ -1404,6 +1438,44 @@ export function cmdLint(args: string[]): void {
 	}
 }
 
+// ── update ─────────────────────────────────────────────────────────
+
+/** Bring the installed CLI current; the replacement binary refreshes its own skill bundle. */
+export async function cmdUpdate(
+	args: string[],
+	currentVersion: string,
+): Promise<void> {
+	const result = await updateCli(currentVersion, args);
+	if (!result.updated) {
+		if (result.available === currentVersion)
+			console.log(`Folio ${currentVersion} is up to date.`);
+		else if (!process.stdin.isTTY && !args.includes("--yes"))
+			console.log(
+				`Folio ${currentVersion} → ${result.available}. Re-run in a terminal or use --yes.`,
+			);
+		else
+			console.log(`Folio ${currentVersion} → ${result.available} not applied.`);
+		return;
+	}
+
+	console.log(`Updated Folio ${result.current} → ${result.available}.`);
+	const skillPath = readConfig("skill");
+	if (!skillPath) return;
+	const executable = process.argv[1];
+	const refresh = spawnSync(
+		process.execPath,
+		[executable, "skill", "install"],
+		{ encoding: "utf-8" },
+	);
+	if (refresh.status === 0) {
+		console.log(`Skill refreshed at ${skillPath}.`);
+	} else {
+		console.log(
+			`CLI updated, but skill refresh failed. Run \`folio skill install\`: ${refresh.stderr || refresh.stdout}`,
+		);
+	}
+}
+
 // ── skill ──────────────────────────────────────────────────────────
 
 /**
@@ -1415,7 +1487,30 @@ export function cmdLint(args: string[]): void {
  * Bare `folio skill install` (no path) reuses the path recorded under the
  * `skill` config key from a prior install.
  */
-function skillInstall(target: string | undefined): void {
+const SKILL_MANIFEST = ".folio-skill-manifest.json";
+type SkillManifest = { version: 1; files: Record<string, string> };
+
+function digest(content: string): string {
+	return createHash("sha256").update(content).digest("hex");
+}
+
+function readSkillManifest(path: string): SkillManifest | null {
+	const manifest = join(path, SKILL_MANIFEST);
+	if (!existsSync(manifest)) return null;
+	try {
+		const parsed = JSON.parse(readFileSync(manifest, "utf-8")) as SkillManifest;
+		return parsed.version === 1 && parsed.files ? parsed : null;
+	} catch {
+		console.log(
+			"  (couldn't read prior Folio skill manifest; preserving stale files)",
+		);
+		return null;
+	}
+}
+
+/** Synchronize the embedded skill without touching unrelated directory files. */
+export function skillInstall(target: string | undefined): void {
+	ensureConfig();
 	const recorded = readConfig("skill");
 	const resolvedTarget = target ?? recorded;
 	if (!resolvedTarget) {
@@ -1426,6 +1521,29 @@ function skillInstall(target: string | undefined): void {
 
 	const abs = resolvePath(resolvedTarget);
 	const files = Object.keys(skillBundle).sort();
+	const next: SkillManifest = {
+		version: 1,
+		files: Object.fromEntries(
+			files.map((rel) => [rel, digest(skillBundle[rel] as string)]),
+		),
+	};
+	const previous = readSkillManifest(abs);
+
+	// Remove only an obsolete Folio-managed file that still exactly matches
+	// its recorded content. A local edit remains in place and is reported.
+	if (previous) {
+		for (const [rel, priorHash] of Object.entries(previous.files)) {
+			if (next.files[rel]) continue;
+			const dest = join(abs, rel);
+			if (!existsSync(dest)) continue;
+			if (digest(readFileSync(dest, "utf-8")) === priorHash) {
+				unlinkSync(dest);
+				console.log(`removed obsolete ${rel}`);
+			} else {
+				console.log(`preserved modified obsolete ${rel}`);
+			}
+		}
+	}
 
 	for (const rel of files) {
 		const dest = join(abs, rel);
@@ -1434,10 +1552,15 @@ function skillInstall(target: string | undefined): void {
 		console.log(`wrote ${rel}`);
 	}
 
+	mkdirSync(abs, { recursive: true });
+	const manifest = join(abs, SKILL_MANIFEST);
+	const temp = `${manifest}.${process.pid}.tmp`;
+	writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+	renameSync(temp, manifest);
 	writeConfig("skill", abs);
 	restampSkillFile(join(abs, "SKILL.md"), baseRepo());
 
-	console.log(`\n${files.length} file(s) written to ${abs}`);
+	console.log(`\n${files.length} file(s) synchronized to ${abs}`);
 }
 
 export function cmdSkill(args: string[]): void {

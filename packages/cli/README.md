@@ -16,6 +16,9 @@ Install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+
+# Or pin an immutable release:
+FOLIO_VERSION=v0.3.4 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 ```
 
 By default, the installer places `folio` at:
@@ -28,6 +31,9 @@ Use a custom install directory with `FOLIO_BIN_DIR`:
 
 ```bash
 FOLIO_BIN_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
+
+# Or pin an immutable release:
+FOLIO_VERSION=v0.3.4 curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash
 ```
 
 If the install directory is not on `PATH`, the installer updates your shell rc when possible and prints the `export PATH=...` command for the current terminal.
@@ -131,7 +137,8 @@ Check state:
 
 ```bash
 folio status
-folio status -u  # fetch and fast-forward main when an update is needed
+folio sync       # fast-forward the bound store when it is behind
+folio update     # check/apply the latest stable Folio CLI release
 ```
 
 `status` is the fleet dashboard · one line per open draft, plus main's
@@ -150,7 +157,7 @@ Bound to owner/repo · ~/.config/folio/stores/.main
 When the bound source has moved:
 
 ```text
-Needs update, run `folio status -u`
+Needs sync, run `folio sync`
 No drafts
 
 Bound to owner/repo · ~/.config/folio/stores/.main
@@ -203,7 +210,9 @@ folio create <path>                  scaffold a new folio and bind to it
 folio draft <topic>                  start or resume a draft (--force to restart)
 folio proof <topic>                  commit dirty work, lint, rebase; push + draft PR (pr) or show diff (merge)
 folio publish <topic>                merge the draft into main (squash for merge strategy)
-folio status [-u]                    fleet dashboard: every draft's state; -u fast-forwards main
+folio status                         fleet dashboard: every draft's state
+folio sync [--yes]                   fast-forward the bound store when needed
+folio update [--version X.Y.Z] [--yes] check or install a stable CLI release
 folio list                           list drafts
 folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
 folio web                            open the web review surface (needs a remote)
@@ -324,8 +333,4 @@ bun install
 bun run build
 ```
 
-The installer downloads the prebuilt file from:
-
-```text
-packages/cli/dist/folio.js
-```
+Release CI builds `packages/cli/dist/folio.js` from an annotated `vX.Y.Z` tag and attaches it to the matching GitHub Release. The installer downloads that immutable release asset, never a build from `main`. See [`RELEASE.md`](../../RELEASE.md).

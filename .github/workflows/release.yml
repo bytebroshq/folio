@@ -1,0 +1,36 @@
+name: Release Folio CLI
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Verify release version and build artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git cat-file -t "$GITHUB_REF")" = tag || { echo "Release tags must be annotated."; exit 1; }
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          test "$tag" = "$version" || { echo "Tag v$tag does not match package version $version"; exit 1; }
+          bun run lint
+          bun run --filter @folio/cli build
+          test "$(node packages/cli/dist/folio.js --version)" = "folio $version"
+          grep -F "folio-cli-version: $version" packages/cli/src/skill-bundle.gen.ts
+      - name: Package checksums
+        run: cd packages/cli/dist && sha256sum folio.js > SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" packages/cli/dist/folio.js packages/cli/dist/SHA256SUMS --verify-tag --generate-notes
