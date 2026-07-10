@@ -32,6 +32,7 @@ import {
 import {
 	amendmentBranch,
 	behindCount,
+	currentBranch,
 	ensureBase,
 	ensureGh,
 	fetchMain,
@@ -244,7 +245,7 @@ function bindRemote(remote: string, force: boolean): void {
 		{ quiet: true },
 	);
 	const ff = run(
-		`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || echo "(main behind remote — run 'folio sync' to catch up)"`,
+		`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || echo "(main behind remote — run 'folio status --sync' to catch up)"`,
 		{ quiet: true },
 	);
 	if (ff.stdout) console.log(`  ${ff.stdout}`);
@@ -946,7 +947,7 @@ export function cmdPublish(args: string[]): void {
 	);
 	if (ff.exitCode !== 0) {
 		console.log(
-			"  (couldn't fast-forward main from origin — run 'folio sync')",
+			"  (couldn't fast-forward main from origin — run 'folio status --sync')",
 		);
 	}
 
@@ -1098,6 +1099,10 @@ function branchIncludesMain(branch: string): boolean {
 
 /** `folio status` is the fleet dashboard: one line per open draft. */
 export function cmdStatus(args: string[] = []): void {
+	if (args.length > 1 || (args.length === 1 && args[0] !== "--sync")) {
+		throw new Error("Usage: folio status [--sync]");
+	}
+	const sync = args.includes("--sync");
 	ensureConfig();
 
 	const remote = readConfig("remote");
@@ -1111,7 +1116,6 @@ export function cmdStatus(args: string[] = []): void {
 
 	printSkillDrift();
 
-	if (args.length > 0) throw new Error("Usage: folio status");
 	const bound = boundPath ?? (remote as string);
 	const base = baseRepo();
 
@@ -1130,6 +1134,25 @@ export function cmdStatus(args: string[] = []): void {
 		? " (couldn't reach remote — showing cached state)"
 		: "";
 
+	if (sync && hasRemote() && !fetchFailed) {
+		const branch = currentBranch();
+		if (branch !== "main") {
+			throw new Error(
+				`Cannot sync while the bound checkout is on '${branch}'. Switch it to main first.`,
+			);
+		}
+		const behind = behindCount();
+		if (behind > 0) {
+			const pull = withMainLock(() =>
+				run(`git -C "${base}" pull --ff-only origin main --quiet 2>&1`),
+			);
+			if (pull.exitCode !== 0) {
+				throw new Error(`Status sync failed: ${pull.stderr || pull.stdout}`);
+			}
+			console.log(`Synchronized ${behind} commit(s).`);
+		}
+	}
+
 	// Main's own state: dirty, behind, or up to date.
 	const mainDirty =
 		run(`git -C "${base}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, {
@@ -1145,7 +1168,7 @@ export function cmdStatus(args: string[] = []): void {
 	} else {
 		const behind = mainExists() ? behindCount() : 0;
 		if (behind > 0) {
-			console.log(`Needs sync, run \`folio sync\`${staleNote}`);
+			console.log(`Needs sync, run \`folio status --sync\`${staleNote}`);
 		} else {
 			console.log(`Up to date${staleNote}`);
 		}
@@ -1217,47 +1240,6 @@ export function cmdStatus(args: string[] = []): void {
 	}
 
 	printStatusFooter(bound, base);
-}
-
-// ── sync ───────────────────────────────────────────────────────────
-
-export function cmdSync(args: string[]): void {
-	if (args.some((arg) => arg !== "--yes"))
-		throw new Error("Usage: folio sync [--yes]");
-	ensureConfig();
-	ensureBase();
-	if (!hasRemote()) {
-		console.log("Bound to a local folio; there is no remote store to sync.");
-		return;
-	}
-	fetchMain();
-	const behind = behindCount();
-	if (behind === 0) {
-		console.log("Store is up to date.");
-		return;
-	}
-	if (!args.includes("--yes") && !process.stdin.isTTY) {
-		console.log(
-			`Store is ${behind} commit(s) behind. Re-run in a terminal or use --yes.`,
-		);
-		return;
-	}
-	if (!args.includes("--yes")) {
-		process.stdout.write(
-			`Store is ${behind} commit(s) behind. Fast-forward? [Y/n] `,
-		);
-		const answer = readFileSync(0, "utf-8").trim().toLowerCase();
-		if (answer === "n" || answer === "no") {
-			console.log("Sync not applied.");
-			return;
-		}
-	}
-	const pull = withMainLock(() =>
-		run(`git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>&1`),
-	);
-	if (pull.exitCode !== 0)
-		throw new Error(`Sync failed: ${pull.stderr || pull.stdout}`);
-	console.log("Store is up to date.");
 }
 
 // ── config command ────────────────────────────────────────────────

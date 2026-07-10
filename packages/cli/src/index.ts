@@ -20,7 +20,6 @@ import {
 	cmdPublish,
 	cmdSkill,
 	cmdStatus,
-	cmdSync,
 	cmdUpdate,
 	cmdWeb,
 } from "./commands";
@@ -43,8 +42,7 @@ Usage:
   folio draft <topic>              Start or resume a draft (--force to restart)
   folio proof <topic>              Commit dirty work, lint, rebase; push + open draft PR (pr) or show diff (local)
   folio publish <topic>            Merge the draft into main
-  folio status                     Fleet dashboard: every draft's state
-  folio sync [--yes]               Fast-forward the bound store when needed
+  folio status [--sync]            Fleet dashboard; --sync fast-forwards the bound store
   folio update [--version X.Y.Z] [--yes]  Check or install a stable CLI release
   folio drop <topic> --force       Delete a draft (local + remote)
   folio list                       List all drafts
@@ -106,9 +104,6 @@ try {
 			break;
 		case "update":
 			await cmdUpdate(args, pkg.version);
-			break;
-		case "sync":
-			cmdSync(args);
 			break;
 		case "config":
 			cmdConfig(args);

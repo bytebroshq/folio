@@ -137,7 +137,7 @@ Check state:
 
 ```bash
 folio status
-folio sync       # fast-forward the bound store when it is behind
+folio status --sync  # fast-forward the bound store when it is behind
 folio update     # check/apply the latest stable Folio CLI release
 ```
 
@@ -157,7 +157,7 @@ Bound to owner/repo · ~/.config/folio/stores/.main
 When the bound source has moved:
 
 ```text
-Needs sync, run `folio sync`
+Needs sync, run `folio status --sync`
 No drafts
 
 Bound to owner/repo · ~/.config/folio/stores/.main
@@ -210,8 +210,7 @@ folio create <path>                  scaffold a new folio and bind to it
 folio draft <topic>                  start or resume a draft (--force to restart)
 folio proof <topic>                  commit dirty work, lint, rebase; push + draft PR (pr) or show diff (merge)
 folio publish <topic>                merge the draft into main (squash for merge strategy)
-folio status                         fleet dashboard: every draft's state
-folio sync [--yes]                   fast-forward the bound store when needed
+folio status [--sync]                fleet dashboard; --sync fast-forwards the bound store
 folio update [--version X.Y.Z] [--yes] check or install a stable CLI release
 folio list                           list drafts
 folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
