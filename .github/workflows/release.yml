@@ -17,10 +17,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Verify release version and build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git cat-file -t "$GITHUB_REF")" = tag || { echo "Release tags must be annotated."; exit 1; }
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq .object.type)" = tag || { echo "Release tags must be annotated."; exit 1; }
           tag="${GITHUB_REF_NAME#v}"
           version="$(node -p "require('./packages/cli/package.json').version")"
           test "$tag" = "$version" || { echo "Tag v$tag does not match package version $version"; exit 1; }
