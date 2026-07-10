@@ -1,20 +1,20 @@
 # CLI releases
 
-Folio publishes an immutable, versioned CLI and embedded-skill bundle.
+Folio publishes an immutable, versioned CLI and skill archive.
 
 ## What a release contains
 
 A release is an **annotated** `vX.Y.Z` Git tag and its GitHub Release. The
-release attaches the Node executable (`folio.js`) and `SHA256SUMS`. CI builds
-both from the tagged commit; `dist/` is generated for releases and is not
-committed.
+release attaches the Node executable (`folio.js`), skill archive
+(`folio-skill.tar.gz`), and `SHA256SUMS`. CI builds all release assets from
+the tagged commit; `dist/` is generated for releases and is not committed.
 
 Before publishing, CI rejects a tag unless all of these agree:
 
 - the tag is `vX.Y.Z`;
 - `packages/cli/package.json` is `X.Y.Z`;
 - `folio --version` reports `X.Y.Z`; and
-- the embedded skill has `metadata.folio-cli-version: X.Y.Z`.
+- `packages/skills/folio/version.js` reports that CLI version.
 
 ## Publishing a release
 
@@ -45,13 +45,20 @@ executable from mutable `main`.
 version change and asks before applying it; without a TTY it reports only.
 `folio update --yes` applies it without the prompt, and `--version X.Y.Z`
 selects an explicit stable release. Updating preserves bindings and config,
-then refreshes the skill at the recorded skill path.
+then refreshes the skill at the recorded skill path from the matching release
+archive.
 
 ## Skill synchronization
 
-`folio skill install` owns only files listed in its `.folio-skill-manifest.json`
-manifest. It overwrites current bundled files on an explicit install and
-removes obsolete managed files only if they still match their recorded hash.
+`folio skill install` downloads the checksum-verified `folio-skill.tar.gz`
+asset matching its own CLI version. The archive contains the authored skill,
+including its `version.js` lock checker. By default it locally enriches the
+installed `SKILL.md` description with the bound block's `INDEX.md` description
+inside `<contains>...</contains>`; `--no-enrich` removes and disables that
+local enrichment. The command owns only files listed in its
+`.folio-skill-manifest.json` manifest. It overwrites current archive files on
+an explicit install and removes obsolete managed files only if they still match
+their recorded hash.
 It preserves unrelated files and locally modified obsolete Folio files, with a
 message. This addresses [#24](https://github.com/bytebroshq/folio/issues/24).
 

@@ -27,12 +27,10 @@ jobs:
           version="$(node -p "require('./packages/cli/package.json').version")"
           test "$tag" = "$version" || { echo "Tag v$tag does not match package version $version"; exit 1; }
           bun run lint
-          bun run --filter @folio/cli build
-          test "$(node packages/cli/dist/folio.js --version)" = "folio $version"
-          grep -F "folio-cli-version: $version" packages/cli/src/skill-bundle.gen.ts
+          bun run verify-release -- --tag "$GITHUB_REF_NAME"
       - name: Package checksums
-        run: cd packages/cli/dist && sha256sum folio.js > SHA256SUMS
+        run: cd packages/cli/dist && sha256sum folio.js folio-skill.tar.gz > SHA256SUMS
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" packages/cli/dist/folio.js packages/cli/dist/SHA256SUMS --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" packages/cli/dist/folio.js packages/cli/dist/folio-skill.tar.gz packages/cli/dist/SHA256SUMS --verify-tag --generate-notes

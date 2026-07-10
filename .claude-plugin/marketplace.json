@@ -1,0 +1,14 @@
+{
+	"name": "bytebros-folio",
+	"owner": {
+		"name": "ByteBros"
+	},
+	"plugins": [
+		{
+			"name": "folio",
+			"source": "./packages/skills/folio",
+			"description": "Folio knowledgebase workflow skill",
+			"skills": ["."]
+		}
+	]
+}

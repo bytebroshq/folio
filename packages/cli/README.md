@@ -218,7 +218,8 @@ folio web                            open the web review surface (needs a remote
 folio config                         show config
 folio config <key> <value>           set config
 folio lint [<topic>]                 check folio integrity (a draft, or main if omitted)
-folio skill install <path>           write the embedded folio skill into <path>, remembering it
+folio skill install <path>           download the matching Folio skill into <path>, remembering it
+folio skill install --no-enrich      install without the bound block description
 folio skill install                  re-run against the remembered path
 ```
 
@@ -274,8 +275,9 @@ git origin points at GitHub). `path` cannot be set here — location is a
 bind-time decision, so changing it means `folio bind`.
 
 `skill` holds the path where `folio skill install` last wrote the skill
-(see [Skill](#skill)) — set by `skill install`, not meant to be hand-edited
-here.
+(see [Skill](#skill)). `skill-enrich` records whether its bound block
+description enrichment is enabled. Both are set by `skill install`, not meant
+to be hand-edited here.
 
 Rebind to a different repo, GitHub or local:
 
@@ -289,8 +291,9 @@ may be re-cloned; a custom `path` directory is yours and is never deleted.
 
 ## Skill
 
-`folio skill install <path>` unpacks the CLI's embedded copy of the folio
-skill into `<path>`, and records `<path>` under the `skill` config key.
+`folio skill install <path>` downloads the checksum-verified skill archive
+from the immutable release matching the CLI version, unpacks it into `<path>`,
+and records `<path>` under the `skill` config key.
 Once recorded, a bare re-run reuses it:
 
 ```bash
@@ -298,29 +301,14 @@ folio skill install ~/.claude/skills/folio   # first time — records the path
 folio skill install                          # later — reuses it
 ```
 
-If a bound block's `INDEX.md` carries frontmatter with a `description` — the
-block's "scent," one authored sentence naming what it covers (SPEC.md §7) —
-install stamps it onto the written `SKILL.md`'s own frontmatter
-`description` as a trailing `Bound folio: <scent>` clause. Agent harnesses
-that keep a skill's description always-in-context then have a better chance
-of firing the skill on a topic mention, whatever block happens to be bound.
-No scent (unbound, or an `INDEX.md` without one) means no suffix.
-
-Stamping is idempotent — installing twice in a row produces byte-identical
-output — and re-stamping always replaces any prior `Bound folio: ...`
-clause rather than appending to it.
-
-`folio bind` re-stamps automatically after a successful bind, if a skill was
-previously installed and its `SKILL.md` still exists at the recorded path.
-`folio status` is a stateless drift check: if the installed description's
-scent no longer matches the bound block's live `INDEX.md`, it prints:
-
-```text
-Skill description out of date, run `folio skill install`
-```
-
-Silent when there's no `skill` config key, no installed `SKILL.md`, or the
-two already agree.
+The archive contains the authored skill unchanged, including `version.js`.
+Run `./version.js --is-cli-match` from the installed skill directory to
+verify that it and `folio` are the same release. By default, installation
+locally enriches the skill description with the bound block's `INDEX.md`
+description, wrapped in `<contains>...</contains>`. Pass `--no-enrich` to
+remove and disable that enrichment; pass `--enrich` to re-enable it.
+Package-manager installs that omit `version.js` remain usable without a
+version lock.
 
 ## Development
 
@@ -332,4 +320,4 @@ bun install
 bun run build
 ```
 
-Release CI builds `packages/cli/dist/folio.js` from an annotated `vX.Y.Z` tag and attaches it to the matching GitHub Release. The installer downloads that immutable release asset, never a build from `main`. See [`RELEASE.md`](../../RELEASE.md).
+Release CI builds `packages/cli/dist/folio.js` and `folio-skill.tar.gz` from an annotated `vX.Y.Z` tag and attaches them to the matching GitHub Release. The installer and skill command download immutable release assets, never a build from `main`. See [`RELEASE.md`](../../RELEASE.md).

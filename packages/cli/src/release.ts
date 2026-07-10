@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 const REPO = "bytebroshq/folio";
-const ASSET = "folio.js";
+const CLI_ASSET = "folio.js";
+export const SKILL_ASSET = "folio-skill.tar.gz";
 const CHECKSUMS = "SHA256SUMS";
 
 type Release = {
@@ -73,14 +74,35 @@ function sha256(data: Buffer): string {
 	return createHash("sha256").update(data).digest("hex");
 }
 
-function expectedChecksum(contents: string): string {
+function expectedChecksum(contents: string, asset: string): string {
 	const line = contents
 		.split("\n")
-		.find((entry) => entry.trim().endsWith(` ${ASSET}`));
+		.find((entry) => entry.trim().endsWith(` ${asset}`));
 	const checksum = line?.trim().split(/\s+/)[0];
 	if (!checksum || !/^[a-f0-9]{64}$/i.test(checksum))
-		throw new Error("Release checksum manifest does not contain folio.js.");
+		throw new Error(`Release checksum manifest does not contain ${asset}.`);
 	return checksum.toLowerCase();
+}
+
+/** Download one named asset from an immutable release and verify its checksum. */
+export async function downloadReleaseAsset(
+	release: Release,
+	assetName: string,
+): Promise<Buffer> {
+	const asset = release.assets.find((item) => item.name === assetName);
+	const sums = release.assets.find((item) => item.name === CHECKSUMS);
+	if (!asset || !sums)
+		throw new Error(`Release is missing ${assetName} or ${CHECKSUMS}.`);
+	const [contents, checksumFile] = await Promise.all([
+		download(asset.browser_download_url),
+		download(sums.browser_download_url),
+	]);
+	if (
+		sha256(contents) !==
+		expectedChecksum(checksumFile.toString("utf-8"), assetName)
+	)
+		throw new Error(`Downloaded ${assetName} failed checksum verification.`);
+	return contents;
 }
 
 export type UpdateResult = {
@@ -117,16 +139,7 @@ export async function updateCli(
 	const executable = resolve(process.argv[1] || "");
 	if (!process.argv[1])
 		throw new Error("Cannot determine the installed Folio executable.");
-	const asset = release.assets.find((item) => item.name === ASSET);
-	const sums = release.assets.find((item) => item.name === CHECKSUMS);
-	if (!asset || !sums)
-		throw new Error("Release is missing folio.js or SHA256SUMS.");
-	const [binary, checksumFile] = await Promise.all([
-		download(asset.browser_download_url),
-		download(sums.browser_download_url),
-	]);
-	if (sha256(binary) !== expectedChecksum(checksumFile.toString("utf-8")))
-		throw new Error("Downloaded folio.js failed checksum verification.");
+	const binary = await downloadReleaseAsset(release, CLI_ASSET);
 
 	const tempDir = mkdtempSync(join(tmpdir(), "folio-update-"));
 	const candidate = join(tempDir, basename(executable));
