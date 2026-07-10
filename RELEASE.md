@@ -1,7 +1,6 @@
 # CLI releases
 
-Folio publishes an immutable, versioned CLI and embedded-skill bundle. The
-release implementation is tracked in [#33](https://github.com/bytebroshq/folio/issues/33).
+Folio publishes an immutable, versioned CLI and embedded-skill bundle.
 
 ## What a release contains
 
