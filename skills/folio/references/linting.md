@@ -1,59 +1,41 @@
-# Folio linting guide
+# Folio linting
 
-Lint rules are conformance rules from SPEC.md §11 — properties of the files
-themselves, mechanical and deterministic. The CLI checks them fast; every one
-of them can also be verified by hand. Lint MUST NOT use semantic ranking,
-RAG, or LLM inference to decide validity.
+Lint checks deterministic file conformance. It does not judge meaning, rank content, or use LLM inference.
 
-## The rules
+## What lint checks
 
-- root `INDEX.md` exists
-- root `SCHEMA.md` exists
-- filenames are kebab-case
-- bracket links resolve to existing `.md` files
-- no relative path markers in bracket links (`./`, `../`)
-- no stale index entries (index links to deleted/renamed leaves)
-- no orphan leaves (every leaf MUST appear in `INDEX.md`)
-- no duplicate index entries
-- description sync: when a leaf has a `description` frontmatter field and an
-  index entry (`- [[leaf]] — description`), the entry text must exactly
-  match the leaf's description after whitespace normalization
-- frontmatter is well-formed YAML, when present
-- leaves are not oversized
+- Root `INDEX.md` and `SCHEMA.md` exist.
+- Leaf filenames are kebab-case.
+- Bracket links resolve and do not use `./` or `../`.
+- `INDEX.md` has no stale or duplicate entries, and every leaf appears there.
+- Index descriptions match a leaf's `description` frontmatter after whitespace normalization.
+- Frontmatter is valid YAML.
+- Leaves stay within the size limit.
 
-Flat or shallow structure is preferred, but nesting is not a format failure —
-a linter may warn about deep nesting or path-heavy catalogs as usability
-issues. Strict lint fails on errors, not warnings.
+Deep nesting and path-heavy catalogs are warnings, not format failures.
 
-## With the CLI
+## Prefer `proof` over `lint`
 
-```bash
-folio lint --strict        # fail on errors
+Use `folio proof <topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` only for read-only checks.
+
+```sh
+folio lint --strict        # check the bound base store; fail on errors
+folio lint <topic>         # check a draft without preparing it
 folio lint --json          # machine-readable output
-folio lint --spec folio    # select the Folio Knowledge Format profile explicitly
-folio lint --spec okf      # lint an OKF bundle by its own rules instead
+folio lint --spec folio    # select the Folio profile
+folio lint --spec okf      # select the OKF profile
 ```
 
-`folio proof` runs lint automatically before staging a folio draft for review.
+## Without the CLI
 
-## By hand
+Write a small temporary checker for the contract above; do not use semantic or LLM judgment.
 
-From the folio root:
+1. Recursively collect Markdown files and identify reserved roots and leaves.
+2. Validate leaf filenames.
+3. Extract bracket links and verify their root-relative targets.
+4. Compare `INDEX.md` entries with the leaf set for missing, stale, and duplicate entries.
+5. Parse frontmatter and compare index descriptions after whitespace normalization.
+6. Measure each leaf against the size limit.
+7. Report errors separately from structural warnings.
 
-```bash
-ls INDEX.md SCHEMA.md                              # reserved files exist
-ls *.md | grep -E '[A-Z_ ]'                        # kebab-case violations (ignore reserved files)
-grep -rno '\[\[[^]]*\]\]' --include='*.md' .       # list all wikilinks…
-grep -rn '\[\[\.\.\?/' --include='*.md' .          # …relative path markers
-```
-
-Then check, leaf by leaf against the link list:
-
-- every `[[target]]` has a matching `target.md` (folio-root-relative)
-- every entry in `INDEX.md` points at an existing leaf, exactly once
-- every leaf appears in `INDEX.md`
-- for each leaf with a `description` field and an index entry, the entry's
-  description text matches the frontmatter `description` exactly
-  (whitespace-normalized)
-- frontmatter blocks parse as YAML
-- no leaf has grown past a comfortable read (split or reorg if so)
+Do not add the checker to the Folio repository unless the user asks. Fix errors and repeat the check.

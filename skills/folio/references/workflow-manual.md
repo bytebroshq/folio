@@ -1,35 +1,60 @@
-# Folio draft workflow — manual
+# Manual draft workflow
 
-When the `folio` CLI is not installed, the ritual uses plain git and the GitHub CLI (or the web). The CLI ritual (`workflow-cli.md`) follows the same shape verb-for-verb if the CLI is available later.
+Use this workflow only when the `folio` CLI is unavailable. If the CLI is available, use `workflow-cli.md` instead.
 
-## Manual ritual
+## Non-negotiable boundary
 
-```bash
-git switch -c amend/<topic> <default-branch>
-# edit leaves; keep the delta small and topical
-# hand-lint against references/linting.md
-git add -A && git commit -m "short message"
-git push -u origin amend/<topic>
-gh pr create --draft --title "..." --body "..."   # or open the PR on the web
-```
+- The default branch is published truth; never commit or push a draft directly to it.
+- Work on one `amend/<topic>` branch per coherent change.
 
-A human reviews and marks the PR ready on GitHub. After the squash merge:
+## Draft lifecycle
 
-```bash
-git switch <default-branch> && git pull --ff-only
-git branch -d amend/<topic>
-```
+1. Bring the default branch current.
 
-No GitHub remote? Same discipline locally: branch, edit, lint, then merge into the default branch only on explicit human approval.
+   ```sh
+   git switch <default-branch>
+   git pull --ff-only
+   ```
+
+2. Create the draft branch.
+
+   ```sh
+   git switch -c amend/<topic>
+   ```
+
+3. Edit only the topical leaves for that draft.
+4. Run the checklist in `references/linting.md`.
+5. Commit the draft.
+
+   ```sh
+   git add -A
+   git commit -m "<short message>"
+   ```
+
+6. Push the branch and open a draft PR.
+
+   ```sh
+   git push -u origin amend/<topic>
+   gh pr create --draft --title "<title>" --body "<body>"
+   ```
+
+7. Wait for human review and ready status. Never run `gh pr ready`.
+8. After the human squash-merges the PR, update the default branch and delete the local draft branch.
+
+   ```sh
+   git switch <default-branch>
+   git pull --ff-only
+   git branch -d amend/<topic>
+   ```
+
+## Conditions
+
+- Without a GitHub remote, use the same branch, edit, lint, and review discipline. Squash-merge into the default branch only with explicit human approval.
+- If another draft lands before this one, rebase this draft onto the updated default branch, rerun the checklist, and push the result before merge.
 
 ## Rules
 
-- The merged default branch is published truth. Never push to it directly.
-- Folio drafts are pending knowledge; surface them as pending, don't adopt them silently as truth.
-- One coherent change per draft; keep deltas small and topical.
-- **Flipping a draft PR to ready is a human act.** Never run `gh pr ready`; let the human do it on GitHub.
-- Squash-merge on publish, preserving the PR title/body with `(#N)` in the subject.
-
-## After merge
-
-Run the lint checklist in `references/linting.md` against the merged result if anything seems off.
+- Treat drafts as pending knowledge, not published truth.
+- Keep one coherent change per draft.
+- A human marks draft PRs ready.
+- Squash-merge approved drafts.
