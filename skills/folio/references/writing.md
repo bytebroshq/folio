@@ -1,25 +1,16 @@
-# Folio writing guide
+# Writing Folio leaves
 
-## Placement
+## Place leaves deliberately
 
-Folio favors flat or shallow structure. Prefer filenames, frontmatter, `INDEX.md`,
-and links over directories.
+Keep the Folio flat or shallow. Prefer clear filenames, frontmatter, `INDEX.md`, and links over directories.
 
-Use deterministic namespace prefixes for collision prevention, e.g.:
+- Check `SCHEMA.md` before choosing a filename prefix or `type` value.
+- Use stable prefixes when the Folio defines them, such as `project-`, `people-`, or `patterns-`.
+- Add one directory level only when a catalog needs it. Avoid deeper paths.
 
-- project pages: `project-*.md`
-- people pages: `people-*.md`
-- reusable patterns: `patterns-*.md`
+## Shape a leaf
 
-Check `SCHEMA.md` for the folio's own prefix vocabulary before inventing one.
-
-One level of nesting is acceptable when a catalog grows. Deeper nesting should be
-a last resort because paths cost tokens, reduce grep-ability, and add link churn.
-
-## Leaf shape
-
-Frontmatter is optional. Use it when filtering, grouping, or tooling needs it,
-preferring the spec's shared field names:
+Use frontmatter when filtering, grouping, or tooling needs it:
 
 ```yaml
 ---
@@ -31,46 +22,31 @@ date: 2026-07-03
 ---
 ```
 
-`type` values are folio-local — define the vocabulary in `SCHEMA.md`.
+`type` values are Folio-local; define them in `SCHEMA.md`. If a leaf has `description` frontmatter, it is the source of truth for the matching `INDEX.md` description.
 
-`description` is the source of truth for the leaf's `INDEX.md` entry text —
-it must match that entry exactly (whitespace-normalized). A folio SHOULD
-declare `description` as required in its own `SCHEMA.md`; the format itself
-only recommends it.
+Use one `# Title` and concise, descriptive sections.
 
-Then use one `# Title` heading and concise sections.
+## Prefer durable notes to summaries
 
-## Writing style
+Write current decisions, constraints, rationale, open questions, and next reads. Keep one idea per paragraph.
 
-Write Folio leaves like concise technical notes.
-
-Principles:
-
-- human-readable first
-- LLM-friendly as a consequence
-- brief enough to scan
-- exact enough to act on
-- one idea per paragraph
-- bullets for sets
-- tables for comparisons
-- code blocks for exact commands, paths, or shapes
-- direct headings
-- preserve decisions, constraints, rationale, open questions, and next reads
-
-Avoid transcript summaries, throat-clearing, and narrative buildup.
+- Use bullets for sets and tables for comparisons.
+- Use code blocks only for exact commands, paths, or shapes.
+- Keep names, dates, commands, paths, and tradeoffs when they make the note actionable.
+- Omit transcript summaries, throat-clearing, and narrative buildup.
 
 Prefer:
 
 ```md
 ## Decision
 
-Use draft pull requests as the folio draft record.
+Use draft pull requests as the Folio draft record.
 
 ## Rationale
 
-- review happens before the change is published
-- GitHub stores comments, diffs, commits, and authorship
-- merged `main` stays canonical
+- Review happens before the change is published.
+- GitHub stores comments, diffs, commits, and authorship.
+- Merged `main` stays canonical.
 ```
 
 Avoid:
@@ -79,42 +55,31 @@ Avoid:
 We discussed several possible options and eventually landed on the idea that PRs might be useful...
 ```
 
-Concise does not mean vague. Keep names, commands, paths, dates, and tradeoffs
-when they are useful.
+## Link and index leaves
 
-## Links
-
-Prefer bare bracket links:
+Use bare bracket links for leaves:
 
 ```md
 [[project-roadmap]]
 [[team-projects]]
 ```
 
-Use shallow folio-root-relative path links only when directories are useful:
+Use shallow Folio-root-relative paths only when a directory is useful:
 
 ```md
 [[clients/acme]]
 ```
 
-Avoid relative path markers like `[[../foo]]` and `[[./foo]]`.
-Use regular Markdown links for external URLs only — never for leaf
-relationships.
+Never use `[[../foo]]` or `[[./foo]]`. Use regular Markdown links only for external URLs.
 
-## Index
+Every leaf belongs in root `INDEX.md`. Add, remove, or reframe its entry whenever the leaf changes materially. Write useful descriptions, not a generated file list:
 
-Every leaf MUST be represented in root `INDEX.md`. Update the relevant
-section when adding, deleting, or materially reframing a page.
+```md
+- [[leaf]] — description
+```
 
-`INDEX.md` should contain useful descriptions, not just a generated file list.
-It may be written by humans, LLMs, or Folio tooling.
+When the leaf has `description` frontmatter, the text after the em dash must match it after whitespace normalization.
 
-An index entry takes the form `- [[leaf]] — description`. When the leaf
-carries a `description` frontmatter field, use that description's exact text
-after the em dash — description-sync lint checks the two match.
+## Drafts are not truth
 
-## Folio drafts
-
-Never treat unmerged folio drafts as canonical truth. Keep each draft small
-and topical. For the full ritual — manual or CLI — see
-`references/workflow-cli.md` and `references/workflow-manual.md`.
+Treat unmerged drafts as pending knowledge. Keep one coherent change per draft. Follow `workflow-cli.md` when the CLI is available; otherwise follow `workflow-manual.md`.

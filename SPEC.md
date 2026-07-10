@@ -4,24 +4,19 @@
 
 The Folio Knowledge Format is linked Markdown with a few strict conventions.
 
-It favors plain files, stable names, concise prose, bracket links, and
-mechanical validation.
+It favors plain files, stable names, concise prose, bracket links, and mechanical validation.
 
-A folio is readable without Folio tooling. The CLI improves authoring, linting,
-and review.
+A folio is readable and editable in ordinary Markdown editors. It requires no specialized runtime or database.
 
-The format is intended to stay usable in common Markdown tools, including tools
-that support Obsidian-style wikilinks.
+The format is intended to remain usable in common Markdown tools, including tools that support Obsidian-style wikilinks.
 
 ---
 
 ## 1. Motivation
 
-The Folio Knowledge Format exists to make Markdown easier to read, link, search,
-and validate.
+The Folio Knowledge Format exists to make Markdown easier to read, link, search, and validate.
 
-Humans get tired reading. Machines get worse when context is noisy. The same fix
-helps both: write less, structure more, and keep links mechanical.
+Humans get tired reading. Machines get worse when context is noisy. The same fix helps both: write less, structure more, and keep links mechanical.
 
 The format favors:
 
@@ -30,11 +25,9 @@ The format favors:
 - **Concision** — brief notes over narrative buildup.
 - **Grep-ability** — stable names, direct wording, and mechanical links.
 
-As a byproduct, the format is friendly to LLM capture and retrieval. Concise,
-structured Markdown gives models less noise to parse and fewer tokens to spend.
+As a byproduct, the format is friendly to LLM capture and retrieval. Concise, structured Markdown gives models less noise to parse and fewer tokens to spend.
 
-The Folio Knowledge Format is not a general ontology. It does not define
-semantic types, relationship vocabularies, or a central schema registry.
+The Folio Knowledge Format is not a general ontology. It does not define semantic types, relationship vocabularies, or a central schema registry.
 
 ---
 
@@ -43,10 +36,8 @@ semantic types, relationship vocabularies, or a central schema registry.
 - **Folio** — A collection of Markdown leaves that follows this format.
 - **Leaf** — One Markdown page in a folio.
 - **Index** — The root `INDEX.md` file. An authored map of the folio.
-- **Schema** — The root `SCHEMA.md` file. Authored convention notes for the
-  folio.
-- **Link** — A bracket link from one leaf to another, commonly called a
-  wikilink. Example: `[[project-roadmap]]` or `[[project-roadmap|Roadmap]]`.
+- **Schema** — The root `SCHEMA.md` file. Authored convention notes for the folio.
+- **Link** — A bracket link from one leaf to another, commonly called a wikilink. Example: `[[project-roadmap]]` or `[[project-roadmap|Roadmap]]`.
 
 ---
 
@@ -64,25 +55,20 @@ path/to/folio/
     └── <leaf>.md
 ```
 
-Folio favors flat or shallow structure. Organization SHOULD come first from
-filenames, frontmatter, `INDEX.md`, and links. Directories are allowed, but they
-add path overhead and make links more expensive to read, write, grep, and move.
+Folio favors flat or shallow structure. Organization SHOULD come first from filenames, frontmatter, `INDEX.md`, and links. Directories are allowed, but they add path overhead and make links more expensive to read, write, grep, and move.
 
-For most folios, keep leaves at the root. For larger catalogs, one level of
-nesting is acceptable. Deeper nesting SHOULD be a last resort.
+For most folios, keep leaves at the root. For larger catalogs, one level of nesting is acceptable. Deeper nesting SHOULD be a last resort.
 
 ### 3.1 Reserved filenames
 
-The following root filenames have defined meaning and MUST NOT be used as
-ordinary leaves:
+The following root filenames have defined meaning and MUST NOT be used as ordinary leaves:
 
 | Filename | Purpose |
 |---|---|
 | `INDEX.md` | Folio map. See §7. |
 | `SCHEMA.md` | Folio convention. See §8. |
 
-The following root filenames SHOULD be avoided for ordinary leaves because other
-tools commonly assign meaning to them:
+The following root filenames SHOULD be avoided for ordinary leaves because other tools commonly assign meaning to them:
 
 | Filename | Common purpose |
 |---|---|
@@ -98,45 +84,34 @@ All other `.md` files are leaves.
 
 Every leaf is a UTF-8 Markdown file.
 
-Frontmatter is recommended when a folio needs filtering, grouping, or tooling.
-A leaf MAY omit frontmatter when the filename, heading, and body are enough.
+Frontmatter is optional. Folio does not prescribe a default metadata schema. A folio MAY use frontmatter for local filtering, grouping, or tooling; a leaf MAY omit it when the filename, heading, and body are enough.
 
 ```yaml
 ---
-title: Human Title
-tags: [project, decision]
+description: One-sentence summary for previews and index generation.
 ---
 ```
 
-### 4.1 Frontmatter
+### 4.1 Optional metadata fields
 
-Recommended fields:
+Folio recognizes the following optional fields for local use. Where they overlap with OKF, §12 defines the compatibility relationship.
 
 | Field | Purpose |
 |---|---|
 | `title` | Human-readable title. |
-| `description` | One-sentence summary for previews and index generation. |
-| `type` | Short string naming the kind of leaf. Used for routing and filtering. |
+| `description` | Leaf description: one-sentence summary for previews and index synchronization. |
+| `type` | Local classification for routing or filtering. |
 | `tags` | Short labels for filtering and grouping. |
 | `date` | Date of the original decision or capture, when useful. |
 | `resource` | URI identifying an external asset the leaf describes, when one exists. |
 
-Leaves SHOULD carry `description`. A conformant folio treats a leaf's
-`description` as the mechanical source for its `INDEX.md` entry text (§7);
-index-sync linting (§11) depends on it. `description` is not otherwise
-required by this specification — adoption is a folio-local convention that a
-folio SHOULD declare in its own `SCHEMA.md`.
+Folio does not require these fields or validate their values. Additional fields MAY be used, and consumers SHOULD preserve unknown fields.
 
-These names align with OKF frontmatter where the two formats overlap, so a
-leaf that carries them is closer to portable across profiles. See §12.
+If a folio uses `type`, it defines that vocabulary in `SCHEMA.md`.
 
-`type` values are folio-local. A folio SHOULD define its `type` vocabulary in
-`SCHEMA.md`. Consumers MUST NOT reject a leaf for an unknown `type`.
+A leaf MAY declare a frontmatter `description` (a leaf description). When it does, its corresponding `INDEX.md` entry MUST carry an index-entry description with the same text after whitespace normalization. When a leaf has no leaf description, Folio imposes no description-sync requirement on its index entry.
 
-Additional fields MAY be used. Consumers SHOULD preserve unknown fields.
-
-`SCHEMA.md` SHOULD document local frontmatter fields, tag meanings, required
-sections, naming conventions, and placement conventions.
+A folio MAY define required frontmatter fields, tag meanings, sections, naming conventions, and placement conventions in its own `SCHEMA.md`.
 
 ### 4.2 Body
 
@@ -144,8 +119,7 @@ The body is Markdown.
 
 A leaf SHOULD use one top-level `#` heading matching the human title.
 
-Producers SHOULD prefer clear sections, lists, tables, and code blocks over
-long unstructured prose.
+Producers SHOULD prefer clear sections, lists, tables, and code blocks over long unstructured prose.
 
 ### 4.3 Writing style
 
@@ -162,8 +136,7 @@ This style is close to plain-language technical writing:
 - code blocks for exact commands or shapes
 - headings that describe the content below them
 
-A leaf SHOULD preserve the useful result without narrating the whole path that
-produced it.
+A leaf SHOULD preserve the useful result without narrating the whole path that produced it.
 
 Prefer:
 
@@ -190,8 +163,7 @@ like maybe pull requests could work pretty well because the review system alread
 of the things we would need...
 ```
 
-Concise does not mean vague. Keep names, commands, paths, dates, and tradeoffs
-when they are useful.
+Concise does not mean vague. Keep names, commands, paths, dates, and tradeoffs when they are useful.
 
 ---
 
@@ -230,16 +202,13 @@ For root leaves, the target is the filename without `.md`.
 [[project-roadmap]] → project-roadmap.md
 ```
 
-For nested leaves, the target MAY include a folio-root-relative path without
-`.md`.
+For nested leaves, the target MAY include a folio-root-relative path without `.md`.
 
 ```text
 [[clients/acme]] → clients/acme.md
 ```
 
-Bare links are preferred. Path links are useful when a folio grows beyond
-a comfortable flat catalog, but they cost more tokens and create more path churn
-when pages move. At that point, you'd want to reach for a tool anyways.
+Bare links are preferred. Path links are useful when a folio grows beyond a comfortable flat catalog, but they cost more tokens and create more path churn when pages move. At that point, you'd want to reach for a tool anyways.
 
 Relative path markers SHOULD NOT be used in bracket links.
 
@@ -268,9 +237,7 @@ DO NOT use Markdown links for folio leaf relationships. Use bracket links instea
 
 It is the folio map. It gives humans and agents a quick overview of the graph.
 
-`INDEX.md` is a map, not just a table of contents. It MAY be written
-or updated by humans, LLMs, or Folio tooling. The goal is useful descriptions
-and navigation, not proof of manual authorship.
+`INDEX.md` is a map, not just a table of contents. It MAY be written or updated by humans, LLMs, or Folio tooling. The goal is useful descriptions and navigation, not proof of manual authorship.
 
 An index SHOULD group leaves by useful headings:
 
@@ -287,29 +254,20 @@ An index SHOULD group leaves by useful headings:
 - [[patterns-css-cascade]] — CSS cascade notes
 ```
 
-An index entry SHOULD take the RECOMMENDED form:
+An index entry is a list line with a single bracket link, optionally followed by an em dash (`—`) and an index-entry description:
 
 ```md
-- [[leaf]] — description text
+- [[leaf]]
+- [[leaf]] — index-entry description
 ```
 
-A list line with a single bracket link followed by an em dash (`—`) and
-description text is an index entry. Lines that do not parse as this shape —
-prose lines, cross-reference notes without a wikilink, headings — are still
-legal in `INDEX.md`; they are simply not entries for the entry-level rules in
-§11.
+An index-entry description is navigation prose. It is independent unless the target leaf declares a leaf description; in that case the two descriptions MUST match after whitespace normalization. Lines that do not parse as index entries — prose, cross-reference notes without a wikilink, and headings — are legal in `INDEX.md`; they are simply not entries for the entry-level rules in §11.
 
 Every leaf MUST appear in `INDEX.md`.
 
 Index entries use the same bracket links throughout a folio.
 
-`INDEX.md` MAY carry its own frontmatter (§4.1). When present, its
-`description` names the block itself — one sentence describing what the
-block covers, as distinct from a leaf's `description`, which describes that
-leaf. Tooling MAY use this field for previews, listings, or to advertise a
-block's coverage to other tooling (e.g. stamping it into an installed
-agent skill's own description). A folio without this field simply forgoes
-that use; nothing else in this specification depends on it.
+`INDEX.md` MAY carry its own frontmatter `description` (a block description). It names the block itself, distinct from a leaf description and an index-entry description. Tooling MAY use it for previews, listings, or to advertise a block's coverage to other tooling. Nothing else in this specification depends on it.
 
 ---
 
@@ -317,11 +275,9 @@ that use; nothing else in this specification depends on it.
 
 `SCHEMA.md` is required.
 
-It documents local conventions for the folio: naming, placement, tags, sections,
-and anti-patterns.
+It documents local conventions for the folio: naming, placement, tags, sections, and anti-patterns.
 
-`SCHEMA.md` is not a machine schema registry. It is human-readable operating
-guidance for the folio.
+`SCHEMA.md` is not a machine schema registry. It is human-readable operating guidance for the folio.
 
 A minimal schema is valid:
 
@@ -345,9 +301,7 @@ A minimal schema is valid:
 
 A folio SHOULD contain pages that belong in the active graph.
 
-Historical material MAY remain as ordinary leaves when it is still useful to
-read. Otherwise, version control or external archives are better places for
-archived material.
+Historical material MAY remain as ordinary leaves when it is still useful to read. Otherwise, version control or external archives are better places for archived material.
 
 ---
 
@@ -360,94 +314,35 @@ A folio is a directory. It MAY be distributed as:
 - a tarball or zip archive
 - a subdirectory inside another project
 
-Git is recommended for authoring because it provides history, attribution,
-diffs, branches, and review workflows. It is not required for format
-conformance.
+Git is recommended for authoring because it provides history, attribution, diffs, branches, and review workflows. It is not required for format conformance.
 
 ---
 
 ## 11. Conformance
 
-A directory is conformant with Folio Knowledge Format v0.1 if:
+A directory conforms to Folio Knowledge Format v0.1 when it:
 
-1. It contains root `INDEX.md`.
-2. It contains root `SCHEMA.md`.
-3. Leaf filenames are kebab-case.
-4. Internal leaf relationships use bracket links.
-5. Bracket links are either bare targets or folio-root-relative paths.
-6. Bracket links resolve to existing `.md` files.
-7. `INDEX.md` does not contain stale leaf entries.
+1. Contains root `INDEX.md`.
+2. Contains root `SCHEMA.md`.
+3. Uses kebab-case leaf filenames.
+4. Uses bracket links for internal leaf relationships.
+5. Uses only bare or folio-root-relative bracket-link targets.
+6. Resolves every bracket link to an existing `.md` file.
+7. Includes every leaf in `INDEX.md`.
+8. Contains no stale or duplicate index entries.
+9. Uses a matching index-entry description when a leaf declares a leaf description.
+10. Uses well-formed YAML when frontmatter is present.
 
-A strict Folio linter SHOULD report:
+A conforming validator reports violations of these requirements as errors. It MAY report deep nesting, path-heavy catalogs, and oversized leaves as usability warnings.
 
-- missing reserved files
-- relative path markers in bracket links
-- broken links
-- stale index entries
-- orphan leaves
-- duplicate index entries
-- description/index description mismatches, when a leaf declares `description` (§4.1, §7)
-- malformed frontmatter, when present
-- oversized leaves
-
-A linter MAY warn when a folio uses deep nesting or many path links. That is a
-usability warning, not a conformance failure.
-
-The linter MUST be mechanical. It MUST NOT use semantic ranking, retrieval, or
-LLM inference to decide whether the folio is valid.
-
-### 11.1 Lint profiles
-
-A linter SHOULD organize its rules into named profiles. A profile is a rule
-set plus the conventions those rules assume (reserved filenames, link syntax,
-required frontmatter).
-
-| Profile | Assumes | Requires |
-|---|---|---|
-| `folio` | This specification. The default. | Rules 1–7 above. |
-| `okf` | OKF bundle conventions. | Parseable frontmatter with non-empty `type`; reserved `index.md` / `log.md` structure; tolerated broken links. |
-
-Selection order:
-
-1. An explicit flag: `folio lint --spec okf`.
-2. Detection: a root `index.md` declaring `okf_version` selects `okf`.
-3. Otherwise `folio` is the default.
-
-Profiles are strict about their own rules and silent about the other
-profile's rules. Running the `folio` profile against an OKF bundle is a user
-error, not a conformance failure of the bundle.
-
-A profile MAY add advisory checks beyond its conformance rules (for example,
-the `okf` profile MAY warn on broken links even though OKF consumers must
-tolerate them). Advisory output MUST be distinguishable from conformance
-failures.
+A validator MUST be mechanical. It MUST NOT use semantic ranking, retrieval, or LLM inference to decide validity.
 
 ---
 
-## 12. Compatibility
+## 12. Interoperability
 
-The Folio Knowledge Format is one linked Markdown format.
+Folio Knowledge Format is an independent, opinionated linked-Markdown format. Its structural conventions remain its own: flat or shallow placement, bracket links, root `INDEX.md` and `SCHEMA.md`, complete indexing, and mechanical validation.
 
-Other profiles, including OKF, MAY use different conventions: nested documents,
-standard Markdown links, required `type` fields, lowercase `index.md`, or looser
-link validation.
+Folio can interoperate with [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md). The formats share some optional metadata names (`title`, `description`, `type`, `tags`, `resource`) with compatible meanings. The shared names do not make those fields required in Folio, and Folio's `date` differs from OKF's `timestamp`: `date` records when the captured fact occurred; `timestamp` records when the document last meaningfully changed.
 
-Folio tooling SHOULD support other profiles explicitly rather than weakening
-Folio rules. Lint profiles (§11.1) are the mechanism: each profile enforces
-its own conventions in full instead of a lowest common denominator.
-
-Where field names overlap with OKF (`title`, `description`, `type`, `tags`,
-`resource`), Folio uses the same names and meanings (§4.1). Folio's `date`
-and OKF's `timestamp` differ: `date` records when the captured fact occurred;
-`timestamp` records when the document last meaningfully changed.
-
-Compatibility should be additive:
-
-```bash
-folio lint --spec folio
-folio lint --spec okf
-folio export okf
-folio import okf
-```
-
-The Folio Knowledge Format remains the default profile unless configured otherwise.
+Tools MAY offer explicit OKF validation, conversion, or import/export. Those tool behaviors are outside this format specification.
