@@ -14,18 +14,17 @@ Lint checks deterministic file conformance. It does not judge meaning, rank cont
 
 Deep nesting and path-heavy catalogs are warnings, not format failures.
 
-## Prefer the CLI
+## Prefer `proof` over `lint`
 
-Use `folio lint` for Folio work. It already performs these checks; do not recreate them manually while the CLI is available.
+Use `folio proof <topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` only for read-only checks.
 
 ```sh
-folio lint --strict        # fail on errors
+folio lint --strict        # check the bound base store; fail on errors
+folio lint <topic>         # check a draft without preparing it
 folio lint --json          # machine-readable output
 folio lint --spec folio    # select the Folio profile
 folio lint --spec okf      # select the OKF profile
 ```
-
-`folio proof <topic>` runs lint for its draft before review preparation. Run `folio lint` directly when checking before work, checking outside `proof`, or diagnosing an error.
 
 ## Without the CLI
 
