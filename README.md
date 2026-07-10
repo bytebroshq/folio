@@ -11,6 +11,8 @@ It combines:
 
 > Folio is in early stage development.
 
+CLI distribution and versioning policy: [`RELEASE.md`](RELEASE.md).
+
 ## Packages
 
 - [`packages/cli`](packages/cli/README.md) — command-line workflow
