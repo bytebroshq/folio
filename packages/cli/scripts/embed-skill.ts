@@ -8,8 +8,9 @@
  */
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const CLI_ROOT = join(import.meta.dir, "..");
+const CLI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = join(CLI_ROOT, "..", "..");
 const SKILL_DIR = join(REPO_ROOT, "skills", "folio");
 const OUT_FILE = join(CLI_ROOT, "src", "skill-bundle.gen.ts");
