@@ -44,6 +44,7 @@ import {
 	isDirty,
 	isMergedToMain,
 	listAmendments,
+	listMergedPRMap,
 	listOpenPRMap,
 	mainExists,
 	mainRef,
@@ -1142,23 +1143,30 @@ export function cmdStatus(args: string[] = []): void {
 	const drafts = listAmendments();
 	if (getStrategy() === "pr" && remote) {
 		const remoteDrafts = listOpenPRMap(remote);
+		const mergedDrafts = listMergedPRMap(remote);
 		const rows = new Map<
 			string,
 			{ topic: string; state: string; branch: string }
 		>();
+		const cleanMergedTopics: string[] = [];
 
 		for (const draft of drafts) {
 			const branch = `amend/${draft.topic}`;
 			const info = remoteDrafts.get(branch);
+			const mergedNumber = mergedDrafts.get(branch);
 			const proofed =
 				info && draft.status !== "dirty" && branchIncludesMain(branch);
+			const cleanMerged = Boolean(mergedNumber && draft.status !== "dirty");
+			if (cleanMerged) cleanMergedTopics.push(draft.topic);
 			rows.set(branch, {
 				topic: draft.topic,
 				state: info
 					? `${proofed ? "proofed" : "unproofed"} · PR #${info.number} ${
 							info.isDraft ? "(draft)" : "(ready)"
 						}`
-					: "unproofed",
+					: mergedNumber
+						? `${draft.status === "dirty" ? "dirty · " : ""}merged · PR #${mergedNumber}`
+						: "unproofed",
 				branch,
 			});
 		}
@@ -1187,6 +1195,12 @@ export function cmdStatus(args: string[] = []): void {
 			console.log("Drafts:");
 			for (const row of ordered) {
 				console.log(`  ${row.topic.padEnd(30)} ${row.state}`);
+			}
+		}
+		if (cleanMergedTopics.length > 0) {
+			console.log("\nMerged drafts can be removed:");
+			for (const topic of cleanMergedTopics.sort()) {
+				console.log(`  folio drop ${topic} --force`);
 			}
 		}
 		printStatusFooter(bound, base);

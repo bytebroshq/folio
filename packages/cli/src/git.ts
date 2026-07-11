@@ -215,6 +215,29 @@ export function listOpenPRMap(
 	return map;
 }
 
+/**
+ * Batch-fetch recently merged PRs by head branch. A squash merge does not
+ * preserve branch ancestry, so this is the authoritative signal for a stale
+ * local draft whose PR has already landed.
+ */
+export function listMergedPRMap(remote: string): Map<string, string> {
+	const map = new Map<string, string>();
+	const result = gh(
+		`pr list --state merged --limit 100 --json number,headRefName --jq '.[] | .headRefName + "@" + (.number|tostring)'`,
+		remote,
+	);
+	if (!result.stdout) return map;
+
+	for (const line of result.stdout.split("\n")) {
+		const separator = line.lastIndexOf("@");
+		if (separator === -1) continue;
+		const branch = line.slice(0, separator);
+		const number = line.slice(separator + 1);
+		if (branch && number) map.set(branch, number);
+	}
+	return map;
+}
+
 export function listAmendments(): {
 	topic: string;
 	status: string;
