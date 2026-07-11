@@ -56,7 +56,7 @@ Use the block's SCHEMA as the guideline for writing. When the CLI is installed, 
 - **CLI Driven** → `references/workflow-cli.md`
 - **Manual Approach** → `references/workflow-manual.md`
 
-Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review. **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`.
+Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review. **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`. A ready PR is that human approval signal: agents must not convert it back to draft unless the user explicitly asks.
 
 ## References
 
