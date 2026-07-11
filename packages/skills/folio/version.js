@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 
 function version() {
-	return "folio 0.3.6";
+	return "folio 0.3.7";
 }
 
 if (process.argv[2] === "--is-cli-match") {
