@@ -120,7 +120,7 @@ function checkRebind(next: Binding, force: boolean): boolean {
 	}
 	if (!force) {
 		throw new Error(
-			`Currently bound to ${describeBinding(current)}. All amendments will be lost. Use --force to re-bind.`,
+			`Currently bound to ${describeBinding(current)}. All drafts will be lost. Use --force to re-bind.`,
 		);
 	}
 	return true;
@@ -956,7 +956,7 @@ export function cmdDrop(args: string[]): void {
 	const path = amendmentPath(slug);
 
 	if (!worktreeExists(path)) {
-		throw new Error(`Amendment '${slug}' not found.`);
+		throw new Error(`Draft '${slug}' not found.`);
 	}
 
 	const branch = amendmentBranch(path);
@@ -982,20 +982,20 @@ export function cmdDrop(args: string[]): void {
 	if (prNum) {
 		if (dirty) {
 			console.log(
-				`  amendment '${slug}' has an open draft PR (#${prNum}) and uncommitted changes.`,
+				`  draft '${slug}' has an open draft PR (#${prNum}) and uncommitted changes.`,
 			);
 		} else {
-			console.log(`  amendment '${slug}' has an open draft PR (#${prNum}).`);
+			console.log(`  draft '${slug}' has an open draft PR (#${prNum}).`);
 		}
 		console.log(
 			"  --force will close the PR, delete the remote branch, and remove local worktree.",
 		);
 	} else if (dirty) {
 		console.log(
-			`  amendment '${slug}' has uncommitted changes. --force discards them.`,
+			`  draft '${slug}' has uncommitted changes. --force discards them.`,
 		);
 	} else {
-		console.log(`  amendment '${slug}' is clean.`);
+		console.log(`  draft '${slug}' is clean.`);
 	}
 
 	if (!force) {
@@ -1027,7 +1027,7 @@ export function cmdDrop(args: string[]): void {
 	if (merge && branch && branch !== "?") {
 		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
 	}
-	console.log(`✓ Dropped amendment '${slug}'.`);
+	console.log(`✓ Dropped draft '${slug}'.`);
 }
 
 // ── status ─────────────────────────────────────────────────────────
@@ -1229,7 +1229,7 @@ export function cmdConfig(args: string[]): void {
 		console.log(`web: ${web}`);
 		// Resolved paths (computed, not stored)
 		console.log(`resolved: ${bound ? baseRepo() : "(not bound)"}`);
-		console.log(`amendments: ${AMEND_DIR}`);
+		console.log(`drafts: ${AMEND_DIR}`);
 		return;
 	}
 
@@ -1320,9 +1320,9 @@ export function cmdList(): void {
 
 	const amendments = listAmendments();
 
-	console.log(tableRow("", "AMENDMENT", "STATUS", "PR"));
+	console.log(tableRow("", "DRAFT", "STATUS", "PR"));
 	if (amendments.length === 0) {
-		console.log("No amendments. Run 'folio draft <topic>' to start one.");
+		console.log("No drafts. Run 'folio draft <topic>' to start one.");
 		return;
 	}
 

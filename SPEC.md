@@ -143,7 +143,7 @@ Prefer:
 ```md
 ## Decision
 
-Use draft pull requests as the amendment record.
+Use draft pull requests as the draft record.
 
 ## Rationale
 
