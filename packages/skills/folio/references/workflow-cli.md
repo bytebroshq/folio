@@ -39,5 +39,6 @@ Use these verbs instead of recreating their steps with Git. Reach for Git only w
 
 - Never push directly to the default branch.
 - Never mark a draft PR ready.
+- Never convert a ready PR back to draft unless the user explicitly asks. Ready is the human approval signal for publishing.
 - Keep one coherent change per draft.
 - Treat drafts as pending knowledge, not published truth.
