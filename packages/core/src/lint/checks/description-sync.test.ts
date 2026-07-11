@@ -114,4 +114,24 @@ describe("descriptionSyncCheck", () => {
 
 		expect(descriptionSyncIssues()).toEqual([]);
 	});
+
+	test.each([
+		">",
+		"|",
+		">-",
+		">+",
+		"|-",
+		"|+",
+	])("supports %s multiline descriptions", (style) => {
+		write(
+			"project-roadmap.md",
+			`---\ndescription: ${style}\n  Product build\n  path.\n---\n\n# Roadmap\n`,
+		);
+		write(
+			"INDEX.md",
+			"# Index\n\n- [[project-roadmap]] — Product build path.\n",
+		);
+
+		expect(descriptionSyncIssues()).toEqual([]);
+	});
 });

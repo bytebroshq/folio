@@ -5,11 +5,10 @@ import type { LintContext, LintIssue } from "../types";
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 
 /**
- * Extract a single top-level, single-line frontmatter field's raw value as
- * plain text. This is intentionally not a YAML parser — it matches a
- * `field: value` line in the frontmatter block and strips one layer of
- * surrounding quotes. Returns undefined when the file has no frontmatter or
- * the field is absent.
+ * Extract a top-level frontmatter field's raw value as plain text. This is
+ * intentionally not a YAML parser: it supports inline values plus the common
+ * folded and literal block-scalar forms used for descriptions. Returns
+ * undefined when the file has no frontmatter or the field is absent.
  */
 export function extractFrontmatterField(
 	content: string,
@@ -18,11 +17,23 @@ export function extractFrontmatterField(
 	const match = content.match(FRONTMATTER_RE);
 	if (!match) return undefined;
 
-	const fieldRe = new RegExp(`^${field}:\\s*(.*)$`, "m");
-	const fieldMatch = match[1].match(fieldRe);
+	const lines = match[1].split(/\r?\n/);
+	const fieldRe = new RegExp(`^${field}:\\s*(.*)$`);
+	const fieldIndex = lines.findIndex((line) => fieldRe.test(line));
+	if (fieldIndex === -1) return undefined;
+
+	const fieldMatch = lines[fieldIndex]?.match(fieldRe);
 	if (!fieldMatch) return undefined;
 
 	let value = fieldMatch[1].trim();
+	if (/^[>|][+-]?$/.test(value)) {
+		const block: string[] = [];
+		for (const line of lines.slice(fieldIndex + 1)) {
+			if (line !== "" && !/^[ \t]/.test(line)) break;
+			block.push(line.trim());
+		}
+		return block.join("\n").trim();
+	}
 	if (
 		(value.startsWith('"') && value.endsWith('"')) ||
 		(value.startsWith("'") && value.endsWith("'"))
