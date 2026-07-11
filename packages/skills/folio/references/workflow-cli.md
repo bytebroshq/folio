@@ -3,7 +3,7 @@
 ## Non-negotiable boundary
 
 - The bound checkout is the base store; it stays on `main`. Otherwise, surface to user.
-- Edit only the amendment worktree created by `folio draft`.
+- Edit only the draft worktree created by `folio draft`.
 
 ## Prefer Folio to Git
 

@@ -2,7 +2,7 @@
 
 A local-first CLI for working with a Folio knowledge repo.
 
-Folio keeps your knowledgebase in git. You edit locally, isolate changes in amendments, and publish amendments as draft pull requests for review.
+Folio keeps your knowledgebase in git. You edit locally, isolate changes in drafts, and publish drafts as draft pull requests for review.
 
 ## Install
 
@@ -96,7 +96,7 @@ The combinations:
   stores/
     .main/                 # managed clone (default location only)
     amendments/
-      my-topic/             # isolated worktree for one amendment
+      my-topic/             # isolated worktree for one draft
 ```
 
 With a custom `path`, `amendments/` holds worktrees of that checkout
@@ -286,7 +286,7 @@ folio bind <owner/repo> --force
 folio bind <path> --force
 ```
 
-Rebinding drops the amendments for the previous binding. The managed clone
+Rebinding drops the drafts for the previous binding. The managed clone
 may be re-cloned; a custom `path` directory is yours and is never deleted.
 
 ## Skill

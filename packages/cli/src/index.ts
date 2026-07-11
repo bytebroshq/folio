@@ -56,7 +56,7 @@ Usage:
   folio lint --strict              Exit 1 if any errors
   folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits bound block context)
 
-Edits go in ~/.config/folio/stores/amendments/<topic>/.
+Edits go in the draft worktree at ~/.config/folio/stores/amendments/<topic>/.
 Flow: draft <topic> → edit → proof <topic> → publish <topic>.
 
 Every draft verb resolves its topic as: explicit argument, then
