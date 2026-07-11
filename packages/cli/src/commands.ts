@@ -961,7 +961,6 @@ export function cmdDrop(args: string[]): void {
 
 	const branch = amendmentBranch(path);
 	const remoteBound = hasRemote();
-	const merge = getStrategy() === "merge";
 	const remote = remoteBound ? getRemote() : "";
 
 	// Check for open PR
@@ -1021,10 +1020,11 @@ export function cmdDrop(args: string[]): void {
 		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
 	);
 
-	// Merge strategy keeps branches in the bound repo — clean up the amend
-	// branch unless it was merged (drop --force may discard unmerged work by
-	// design).
-	if (merge && branch && branch !== "?") {
+	// Every strategy leaves the amend branch in the bound repository after
+	// removing its worktree. Drop --force deliberately discards unmerged work,
+	// so remove that local branch as well and allow the topic to be drafted
+	// again.
+	if (branch && branch !== "?") {
 		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
 	}
 	console.log(`✓ Dropped draft '${slug}'.`);
