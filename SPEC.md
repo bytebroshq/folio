@@ -35,12 +35,12 @@ Folio is not a general ontology. It does not define a universal taxonomy, a cent
 - **Folio** — The format described by this specification.
 - **Block** — A collection of leaves rooted at a directory containing `index.md` and `leaves/`.
 - **Leaf** — A Markdown knowledge document under `leaves/`, excluding structural `index.md` files.
-- **Leaf name** — The globally unique filename stem of a leaf. For `folio-roadmap.md`, the leaf name is `folio-roadmap`.
+- **Leaf name** — The globally unique filename stem of a leaf. For `project-alpha-roadmap.md`, the leaf name is `project-alpha-roadmap`.
 - **Index** — An authored Markdown map. The block has a root `index.md`; nested leaf directories have their own `index.md` files.
 - **Root index** — The required `index.md` at the block root.
 - **Nested index** — An `index.md` inside a subdirectory of `leaves/`.
 - **Conventions** — Optional block-specific guidance in root `conventions.md`.
-- **Wikilink** — A bracket link to a leaf name, such as `[[folio-roadmap]]` or `[[folio-roadmap|Roadmap]]`.
+- **Wikilink** — A bracket link to a leaf name, such as `[[project-alpha-roadmap]]` or `[[project-alpha-roadmap|Roadmap]]`.
 
 ---
 
@@ -53,11 +53,11 @@ path/to/block/
 ├── index.md
 ├── conventions.md          # Optional block-specific conventions.
 ├── leaves/
-│   ├── folio-about.md
+│   ├── knowledge-about.md
 │   └── projects/
 │       ├── index.md
-│       ├── folio-roadmap.md
-│       └── lituus-roadmap.md
+│       ├── project-alpha-roadmap.md
+│       └── project-beta-roadmap.md
 ├── README.md               # Optional repository support file; not Folio knowledge.
 └── AGENTS.md               # Optional repository support file; not Folio knowledge.
 ```
@@ -99,8 +99,8 @@ Every leaf is a UTF-8 Markdown file with YAML frontmatter and a Markdown body.
 ```yaml
 ---
 type: Project
-title: Folio roadmap
-description: Current product direction and planned milestones.
+title: Project alpha roadmap
+description: Current direction and planned milestones.
 ---
 ```
 
@@ -177,7 +177,7 @@ Avoid narrative buildup that does not add durable context.
 Leaf filenames MUST be lowercase kebab-case.
 
 ```text
-folio-roadmap.md
+project-alpha-roadmap.md
 team-projects.md
 patterns-css-cascade.md
 ```
@@ -187,15 +187,15 @@ Every leaf filename stem MUST be unique across the block, regardless of its dire
 Invalid:
 
 ```text
-leaves/projects/folio/roadmap.md
-leaves/projects/lituus/roadmap.md
+leaves/projects/alpha/roadmap.md
+leaves/projects/beta/roadmap.md
 ```
 
 Valid:
 
 ```text
-leaves/projects/folio/folio-roadmap.md
-leaves/projects/lituus/lituus-roadmap.md
+leaves/projects/alpha/project-alpha-roadmap.md
+leaves/projects/beta/project-beta-roadmap.md
 ```
 
 Namespace prefixes are encouraged when they prevent likely collisions:
@@ -217,8 +217,8 @@ A leaf MAY move between directories without changing its leaf name or inbound wi
 Internal relationships between leaves MUST use bare wikilinks.
 
 ```md
-See [[folio-roadmap]].
-See [[folio-roadmap|Roadmap]].
+See [[project-alpha-roadmap]].
+See [[project-alpha-roadmap|Roadmap]].
 ```
 
 The target is a leaf name: the filename without `.md`. Aliases after `|` are optional and do not affect resolution or conformance.
@@ -232,9 +232,9 @@ Wikilink targets MUST NOT contain:
 Avoid:
 
 ```md
-[[projects/folio/folio-roadmap]]
-[[folio-roadmap.md]]
-[[../folio-roadmap]]
+[[projects/alpha/project-alpha-roadmap]]
+[[project-alpha-roadmap.md]]
+[[../project-alpha-roadmap]]
 ```
 
 A wikilink resolves block-wide to exactly one leaf. Broken links and duplicate leaf names are structural errors.
@@ -271,8 +271,8 @@ The root `index.md` is required. It MUST begin with YAML frontmatter containing 
 
 ```yaml
 ---
-title: Product knowledge
-description: Product decisions, implementation patterns, and operating context.
+title: Team knowledge
+description: Team decisions, implementation patterns, and operating context.
 ---
 ```
 
@@ -288,7 +288,7 @@ Example:
 
 ## Overview
 
-- [[folio-about]] — Product identity and principles.
+- [[knowledge-about]] — Product identity and principles.
 
 ## Areas
 
@@ -308,8 +308,8 @@ A nested index lists:
 ```md
 # Projects
 
-- [[folio-roadmap]] — Current product direction and planned milestones.
-- [[lituus-roadmap]] — Current Lituus direction and planned milestones.
+- [[project-alpha-roadmap]] — Current project alpha direction and planned milestones.
+- [[project-beta-roadmap]] — Current project beta direction and planned milestones.
 - [Archived projects](archived/index.md) — Historical projects still useful to read.
 ```
 
@@ -320,13 +320,13 @@ Nested indexes do not require frontmatter. Their top-level heading SHOULD name t
 A leaf entry is a list line containing one wikilink followed by an em dash and the leaf description:
 
 ```md
-- [[folio-roadmap]] — Current product direction and planned milestones.
+- [[project-alpha-roadmap]] — Current project direction and planned milestones.
 ```
 
 A wikilink alias MAY be used without changing the target or metadata contract:
 
 ```md
-- [[folio-roadmap|Roadmap]] — Current product direction and planned milestones.
+- [[project-alpha-roadmap|Roadmap]] — Current project direction and planned milestones.
 ```
 
 Aliases are optional and are not synchronized with leaf titles.
