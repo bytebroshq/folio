@@ -1,41 +1,42 @@
 # Folio linting
 
-Lint checks deterministic file conformance. It does not judge meaning, rank content, or use LLM inference.
+Lint checks deterministic structural conformance. It does not judge meaning, rank content, or use LLM inference.
 
 ## What lint checks
 
-- Root `INDEX.md` and `SCHEMA.md` exist.
-- Leaf filenames are kebab-case.
-- Bracket links resolve and do not use `./` or `../`.
-- `INDEX.md` has no stale or duplicate entries, and every leaf appears there.
-- Index descriptions match a leaf's `description` frontmatter after whitespace normalization.
-- Frontmatter is valid YAML.
-- Leaves stay within the size limit.
+- Root `index.md` and `leaves/` exist.
+- Root-index `title` and `description` frontmatter exists.
+- Leaves live below `leaves/` and have non-empty `type`, `title`, and `description` frontmatter.
+- Leaf filenames are globally unique lowercase kebab-case names.
+- Wikilinks resolve to leaves and use bare names only.
+- Each directory containing leaves has an `index.md`.
+- Every leaf appears once in its responsible structural index.
+- Structural-index descriptions match leaf `description` frontmatter after whitespace normalization.
+- Present frontmatter uses supported YAML syntax.
+- Leaves stay within the size warning limit.
 
-Deep nesting and path-heavy catalogs are warnings, not format failures.
+Deep nesting and Markdown outside `leaves/` may be warnings, not format failures.
 
 ## Prefer `proof` over `lint`
 
-Use `folio proof <topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` only for read-only checks.
+Use `folio proof <topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` for read-only checks.
 
 ```sh
 folio lint --strict        # check the bound base store; fail on errors
 folio lint <topic>         # check a draft without preparing it
 folio lint --json          # machine-readable output
 folio lint --spec folio    # select the Folio profile
-folio lint --spec okf      # select the OKF profile
 ```
 
 ## Without the CLI
 
-Write a small temporary checker for the contract above; do not use semantic or LLM judgment.
+Use a mechanical checker, not semantic or LLM judgment:
 
-1. Recursively collect Markdown files and identify reserved roots and leaves.
-2. Validate leaf filenames.
-3. Extract bracket links and verify their root-relative targets.
-4. Compare `INDEX.md` entries with the leaf set for missing, stale, and duplicate entries.
-5. Parse frontmatter and compare index descriptions after whitespace normalization.
-6. Measure each leaf against the size limit.
-7. Report errors separately from structural warnings.
+1. Identify root `index.md`, `leaves/`, nested indexes, and leaves.
+2. Validate leaf metadata and globally unique filenames.
+3. Resolve bare wikilinks against leaf names.
+4. Verify every leaf has one local structural-index entry.
+5. Compare entry descriptions with leaf frontmatter after whitespace normalization.
+6. Measure leaf size and report errors separately from usability warnings.
 
 Do not add the checker to the Folio repository unless the user asks. Fix errors and repeat the check.

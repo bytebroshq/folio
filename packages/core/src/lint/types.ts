@@ -21,6 +21,8 @@ export interface Wikilink {
 export interface LintFileSet {
 	allMdFiles: string[];
 	rootMdFiles: string[];
+	leafDir: string;
+	indexFiles: string[];
 	contentLeafFiles: string[];
 }
 

@@ -1,118 +1,124 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { lint } from "../index";
 
 let dir: string;
 
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "folio-description-sync-"));
-	writeFileSync(join(dir, "SCHEMA.md"), "# SCHEMA\n");
-});
-
-afterEach(() => {
-	rmSync(dir, { recursive: true, force: true });
-});
-
-function write(name: string, content: string) {
-	writeFileSync(join(dir, name), content);
-}
-
-function descriptionSyncIssues(spec?: string) {
-	return lint(dir, spec ? { spec } : {}).issues.filter(
-		(issue) => issue.check === "description-sync",
+	dir = mkdtempSync(join(tmpdir(), "folio-v02-"));
+	mkdirSync(join(dir, "leaves"));
+	writeFileSync(
+		join(dir, "index.md"),
+		"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n",
 	);
+});
+
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+function write(path: string, content: string) {
+	const file = join(dir, path);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, content);
 }
 
-describe("descriptionSyncCheck", () => {
-	test("no issue when leaf description matches index entry exactly", () => {
-		write(
-			"project-roadmap.md",
-			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
-		);
-		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] — Product build path.\n",
-		);
+function leaf(title = "Project roadmap", description = "Project direction.") {
+	return `---\ntype: Project\ntitle: ${title}\ndescription: ${description}\n---\n\n# ${title}\n`;
+}
 
-		expect(descriptionSyncIssues()).toEqual([]);
+function issues(check: string) {
+	return lint(dir).issues.filter((issue) => issue.check === check);
+}
+
+describe("Folio v0.2 lint", () => {
+	test("accepts a flat, fully indexed block", () => {
+		write("leaves/project-roadmap.md", leaf());
+		write(
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [[project-roadmap]] — Project direction.\n",
+		);
+		expect(lint(dir).issues).toEqual([]);
 	});
 
-	test("errors when leaf description and index entry text differ", () => {
-		write(
-			"project-roadmap.md",
-			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
+	test("requires leaves and root index metadata", () => {
+		rmSync(join(dir, "leaves"), { recursive: true });
+		writeFileSync(join(dir, "index.md"), "# Index\n");
+		expect(issues("structure").map((issue) => issue.message)).toContain(
+			"missing required leaves/ directory",
 		);
-		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] — A totally different summary.\n",
-		);
-
-		const issues = descriptionSyncIssues();
-		expect(issues).toHaveLength(1);
-		expect(issues[0]?.severity).toBe("error");
-		expect(issues[0]?.message).toContain("Product build path.");
-		expect(issues[0]?.message).toContain("A totally different summary.");
+		expect(issues("frontmatter")).toHaveLength(1);
 	});
 
-	test("errors when index entry has no description text", () => {
+	test("requires every leaf's metadata", () => {
+		write("leaves/project-roadmap.md", "# Roadmap\n");
 		write(
-			"project-roadmap.md",
-			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [[project-roadmap]] — Project direction.\n",
 		);
-		write("INDEX.md", "# Index\n\n- [[project-roadmap]]\n");
-
-		const issues = descriptionSyncIssues();
-		expect(issues).toHaveLength(1);
-		expect(issues[0]?.message).toContain("Product build path.");
+		expect(issues("frontmatter").map((issue) => issue.message)).toContain(
+			"missing required YAML frontmatter (type, title, description)",
+		);
 	});
 
-	test("no issue when leaf has no description field", () => {
-		write("project-roadmap.md", "# Roadmap\n\nNo frontmatter here.\n");
+	test("requires nested indexes and indexes leaves locally", () => {
+		write("leaves/projects/project-roadmap.md", leaf());
 		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] — Whatever the index says.\n",
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n",
 		);
-
-		expect(descriptionSyncIssues()).toEqual([]);
+		expect(issues("structure")).toHaveLength(1);
+		expect(issues("orphan")).toHaveLength(1);
 	});
 
-	test("no issue when leaf has a description but no matching index entry", () => {
+	test("accepts a nested leaf indexed by its directory", () => {
+		write("leaves/projects/project-roadmap.md", leaf());
 		write(
-			"project-roadmap.md",
-			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
+			"leaves/projects/index.md",
+			"# Projects\n\n- [[project-roadmap]] — Project direction.\n",
 		);
-		// Mentioned in prose, not as a list-entry per the §7 grammar.
-		write("INDEX.md", "# Index\n\nSee also [[project-roadmap]] for details.\n");
-
-		expect(descriptionSyncIssues()).toEqual([]);
+		write(
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [Projects](leaves/projects/index.md) — Projects.\n",
+		);
+		expect(lint(dir).issues).toEqual([]);
 	});
 
-	test("ASCII hyphens are not treated as the index-entry delimiter", () => {
+	test("rejects duplicate leaf names and qualified links", () => {
+		write("leaves/a/project-roadmap.md", leaf());
+		write("leaves/b/project-roadmap.md", leaf());
 		write(
-			"project-roadmap.md",
-			"---\ndescription: Product build path.\n---\n\n# Roadmap\n",
+			"leaves/a/index.md",
+			"# A\n\n- [[a/project-roadmap]] — Project direction.\n",
 		);
 		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] -- Product build path.\n",
+			"leaves/b/index.md",
+			"# B\n\n- [[b/project-roadmap]] — Project direction.\n",
 		);
-
-		expect(descriptionSyncIssues()).toEqual([]);
+		write(
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [A](leaves/a/index.md) — A.\n- [B](leaves/b/index.md) — B.\n",
+		);
+		expect(issues("duplicate-leaf-name")).toHaveLength(2);
+		expect(issues("path-link")).toHaveLength(2);
 	});
 
-	test("whitespace differences are normalized before comparing", () => {
+	test("requires synchronized structural descriptions", () => {
+		write("leaves/project-roadmap.md", leaf());
 		write(
-			"project-roadmap.md",
-			"---\ndescription: '  Product   build  path.  '\n---\n\n# Roadmap\n",
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [[project-roadmap]] — Different direction.\n",
 		);
-		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] — Product build path.\n",
-		);
+		expect(issues("description-sync")).toHaveLength(1);
+	});
 
-		expect(descriptionSyncIssues()).toEqual([]);
+	test("rejects Markdown links to leaves", () => {
+		write("leaves/project-roadmap.md", leaf());
+		write(
+			"index.md",
+			"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [Roadmap](leaves/project-roadmap.md) — Project direction.\n",
+		);
+		expect(issues("markdown-leaf-link")).toHaveLength(1);
 	});
 
 	test.each([

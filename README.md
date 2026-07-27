@@ -1,11 +1,11 @@
 # Folio
 
-Folio is a local-first Markdown knowledgebase.
+Folio is a local-first, token-conscious Markdown knowledgebase.
 
 It combines:
 
 - **Folio CLI** — bind a repo, create draft worktrees, lint folios, and sync changes for review. See [`packages/cli`](packages/cli/README.md).
-- **Folio Knowledge Format** — linked Markdown with concise pages, stable names, useful `INDEX.md` maps, `SCHEMA.md` conventions, and bracket links. See [`SPEC.md`](SPEC.md).
+- **Folio Knowledge Format** — linked Markdown with concise leaves, globally unique names, bare wikilinks, progressive `index.md` maps, and optional `conventions.md`. See [`SPEC.md`](SPEC.md).
 - **Folio skill** — publishable agent guidance for reading, writing, linting, and reviewing folios. See [`packages/skills/folio`](packages/skills/folio).
 - **Web review surface** — in-progress UI for reviewing and publishing changes. See [`apps/web`](apps/web/README.md).
 

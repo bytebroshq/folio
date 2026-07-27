@@ -328,25 +328,15 @@ export function cmdBind(args: string[]): void {
 
 // ── create ─────────────────────────────────────────────────────────
 
-const INDEX_SCAFFOLD = `# Index
+const INDEX_SCAFFOLD = `---
+title: New knowledge block
+description: Concise knowledge for this block.
+---
 
-Map of this folio. List leaves under useful headings with bracket links to
-each leaf and a short description of what it holds.
-`;
+# Index
 
-const SCHEMA_SCAFFOLD = `# SCHEMA
-
-Local conventions for this folio.
-
-## Naming
-
-- kebab-case filenames
-- namespace prefixes for grouping, e.g. project-, patterns-
-
-## Links
-
-- bracket links between leaves, resolved by filename without the .md extension
-- keep leaves listed in INDEX.md
+Map this block with leaf entries and group links. Create ordinary knowledge
+leaves under leaves/ with type, title, and description frontmatter.
 `;
 
 export function cmdCreate(args: string[]): void {
@@ -359,19 +349,19 @@ export function cmdCreate(args: string[]): void {
 		throw new Error(`${abs} already exists and is not empty.`);
 	}
 
-	mkdirSync(abs, { recursive: true });
-	writeFileSync(`${abs}/INDEX.md`, INDEX_SCAFFOLD, "utf-8");
-	writeFileSync(`${abs}/SCHEMA.md`, SCHEMA_SCAFFOLD, "utf-8");
+	mkdirSync(join(abs, "leaves"), { recursive: true });
+	writeFileSync(join(abs, "index.md"), INDEX_SCAFFOLD, "utf-8");
+	writeFileSync(join(abs, "leaves", ".gitkeep"), "", "utf-8");
 
 	const init = run(
-		`git -C "${abs}" init -b main --quiet && git -C "${abs}" add -A && git -C "${abs}" commit -m "folio: scaffold INDEX and SCHEMA" --quiet`,
+		`git -C "${abs}" init -b main --quiet && git -C "${abs}" add -A && git -C "${abs}" commit -m "folio: scaffold knowledge block" --quiet`,
 	);
 	if (init.exitCode !== 0) {
 		throw new Error(`git init failed in ${abs}: ${init.stderr}`);
 	}
 
 	console.log(`✓ Created folio at ${abs}`);
-	console.log("  INDEX.md, SCHEMA.md");
+	console.log("  index.md, leaves/");
 	console.log("  git init, initial commit");
 
 	bindLocal(abs, args.includes("--force"));

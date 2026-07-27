@@ -2,27 +2,27 @@
 
 ## Place leaves deliberately
 
-Keep the Folio flat or shallow. Prefer clear filenames, frontmatter, `INDEX.md`, and links over directories.
+Put ordinary knowledge under `leaves/`. Prefer a flat layout; use shallow directories when they improve browsing. Every directory under `leaves/` that contains leaves needs an `index.md`.
 
-- Check `SCHEMA.md` before choosing a filename prefix or `type` value.
-- Use stable prefixes when the Folio defines them, such as `project-`, `people-`, or `patterns-`.
-- Add one directory level only when a catalog needs it. Avoid deeper paths.
+- Check optional `conventions.md` for local `type` values, namespaces, and placement practices.
+- Give every leaf a globally unique lowercase kebab-case filename.
+- Use descriptive namespace prefixes when they prevent collisions, such as `project-`, `people-`, or `patterns-`.
 
 ## Shape a leaf
 
-Use frontmatter when filtering, grouping, or tooling needs it:
+Every leaf requires non-empty `type`, `title`, and `description` frontmatter:
 
 ```yaml
 ---
-title: Human Title
-description: One-sentence summary for previews and index generation.
-type: decision
+type: Decision
+title: Human title
+description: One-sentence summary for navigation and retrieval.
 tags: [topic, kind]
 date: 2026-07-03
 ---
 ```
 
-`type` values are Folio-local; define them in `SCHEMA.md`. If a leaf has `description` frontmatter, it is the source of truth for the matching `INDEX.md` description.
+`type` values are block-local. Additional metadata is allowed. The leaf description is the source of truth for its structural index entry.
 
 Use one `# Title` and concise, descriptive sections.
 
@@ -35,50 +35,33 @@ Write current decisions, constraints, rationale, open questions, and next reads.
 - Keep names, dates, commands, paths, and tradeoffs when they make the note actionable.
 - Omit transcript summaries, throat-clearing, and narrative buildup.
 
-Prefer:
-
-```md
-## Decision
-
-Use draft pull requests as the Folio draft record.
-
-## Rationale
-
-- Review happens before the change is published.
-- GitHub stores comments, diffs, commits, and authorship.
-- Merged `main` stays canonical.
-```
-
-Avoid:
-
-```md
-We discussed several possible options and eventually landed on the idea that PRs might be useful...
-```
-
 ## Link and index leaves
 
-Use bare bracket links for leaves:
+Use bare wikilinks for relationships between leaves:
 
 ```md
 [[project-roadmap]]
 [[team-projects]]
 ```
 
-Use shallow Folio-root-relative paths only when a directory is useful:
+Do not use paths, `.md`, `./`, or `../` in wikilinks. Use ordinary Markdown links for indexes, support files, and external URLs.
+
+Every leaf appears exactly once in its structural index:
+
+- a leaf directly below `leaves/` appears in root `index.md`
+- a nested leaf appears in its directory's `index.md`
+
+Use token-efficient list entries:
 
 ```md
-[[clients/acme]]
+- [[project-roadmap]] — Current project direction and planned milestones.
 ```
 
-Never use `[[../foo]]` or `[[./foo]]`. Use regular Markdown links only for external URLs.
-
-Every leaf belongs in root `INDEX.md`. Add, remove, or reframe its entry whenever the leaf changes materially. Write useful descriptions, not a generated file list:
+The text after the em dash must match the leaf's `description` after whitespace normalization. Use group entries to lead readers to nested indexes:
 
 ```md
-- [[leaf]] — description
+- [Projects](leaves/projects/index.md) — Active project knowledge.
 ```
-
-When the leaf has `description` frontmatter, the text after the em dash must match it after whitespace normalization.
 
 ## Drafts are not truth
 

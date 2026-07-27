@@ -3,19 +3,13 @@ import type { LintSpec } from "./types";
 export const folioSpec: LintSpec = {
 	id: "folio",
 	label: "Folio Knowledge Format",
-	requiredRootFiles: ["INDEX.md", "SCHEMA.md"],
-	structuralFiles: [
-		"INDEX.md",
-		"SCHEMA.md",
-		"AGENTS.md",
-		"README.md",
-		"SPEC.md",
-	],
+	requiredRootFiles: ["index.md"],
+	structuralFiles: ["index.md", "conventions.md"],
 	ignoredDirs: [".git", "node_modules", "dist", "build", ".wrangler"],
 	leafFilenamePattern: /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/,
 	leafFilenameDescription: "kebab-case filename, e.g. folio-roadmap.md",
-	maxPreferredNestingDepth: 1,
-	pathLinkWarnThreshold: 10,
+	maxPreferredNestingDepth: 2,
+	pathLinkWarnThreshold: 0,
 	leafTokenWarn: 10_000,
 };
 

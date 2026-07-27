@@ -6,7 +6,13 @@ const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 export function extractWikilinks(content: string): Wikilink[] {
 	const results: Wikilink[] = [];
 	const lines = content.split("\n");
+	let inFence = false;
 	for (let i = 0; i < lines.length; i++) {
+		if (/^\s*(```|~~~)/.test(lines[i])) {
+			inFence = !inFence;
+			continue;
+		}
+		if (inFence) continue;
 		for (const match of lines[i].matchAll(WIKILINK_RE)) {
 			results.push({ link: match[1].trim(), line: i + 1 });
 		}
