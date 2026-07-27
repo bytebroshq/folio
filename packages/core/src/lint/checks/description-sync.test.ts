@@ -121,23 +121,19 @@ describe("Folio v0.2 lint", () => {
 		expect(issues("markdown-leaf-link")).toHaveLength(1);
 	});
 
-	test.each([
-		">",
-		"|",
-		">-",
-		">+",
-		"|-",
-		"|+",
-	])("supports %s multiline descriptions", (style) => {
-		write(
-			"project-roadmap.md",
-			`---\ndescription: ${style}\n  Product build\n  path.\n---\n\n# Roadmap\n`,
-		);
-		write(
-			"INDEX.md",
-			"# Index\n\n- [[project-roadmap]] — Product build path.\n",
-		);
+	test.each([">", "|", ">-", ">+", "|-", "|+"])(
+		"supports %s multiline descriptions",
+		(style) => {
+			write(
+				"leaves/project-roadmap.md",
+				`---\ntype: Project\ntitle: Project roadmap\ndescription: ${style}\n  Product build\n  path.\n---\n\n# Roadmap\n`,
+			);
+			write(
+				"index.md",
+				"---\ntitle: Team knowledge\ndescription: Team context.\n---\n\n# Index\n\n- [[project-roadmap]] — Product build path.\n",
+			);
 
-		expect(descriptionSyncIssues()).toEqual([]);
-	});
+			expect(issues("description-sync")).toEqual([]);
+		},
+	);
 });
