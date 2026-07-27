@@ -17,35 +17,38 @@ export function walkMdFiles(dir: string, spec: LintSpec): string[] {
 		if (entry.name.startsWith(".")) continue;
 
 		const full = join(dir, entry.name);
-		if (entry.isDirectory()) {
-			results.push(...walkMdFiles(full, spec));
-		} else if (entry.name.endsWith(".md")) {
-			results.push(full);
-		}
+		if (entry.isDirectory()) results.push(...walkMdFiles(full, spec));
+		else if (entry.name.endsWith(".md")) results.push(full);
 	}
 
 	return results.sort();
 }
 
 export function rootMdFiles(storeDir: string): string[] {
-	const results: string[] = [];
-	for (const entry of readdirSync(storeDir, { withFileTypes: true })) {
-		if (entry.isFile() && entry.name.endsWith(".md")) {
-			results.push(join(storeDir, entry.name));
-		}
-	}
-	return results.sort();
+	const s = statSync(storeDir, { throwIfNoEntry: false });
+	if (!s?.isDirectory()) return [];
+	return readdirSync(storeDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+		.map((entry) => join(storeDir, entry.name))
+		.sort();
 }
 
 export function collectFiles(storeDir: string, spec: LintSpec): LintFileSet {
+	const leafDir = join(storeDir, "leaves");
 	const allMdFiles = walkMdFiles(storeDir, spec);
-	const rootFiles = rootMdFiles(storeDir);
-	const structural = new Set(spec.structuralFiles);
+	const leafMdFiles = walkMdFiles(leafDir, spec);
+	const indexFiles = [
+		join(storeDir, "index.md"),
+		...leafMdFiles.filter((file) => basename(file) === "index.md"),
+	].filter(exists);
+
 	return {
 		allMdFiles,
-		rootMdFiles: rootFiles,
-		contentLeafFiles: allMdFiles.filter(
-			(file) => !structural.has(basename(file)),
+		rootMdFiles: rootMdFiles(storeDir),
+		leafDir,
+		indexFiles,
+		contentLeafFiles: leafMdFiles.filter(
+			(file) => basename(file) !== "index.md",
 		),
 	};
 }

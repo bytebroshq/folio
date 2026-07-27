@@ -62,7 +62,7 @@ Or bind a local git repo in place — no GitHub, no `gh`:
 folio bind ~/notes/my-folio
 ```
 
-Or scaffold a brand new folio (INDEX.md, SCHEMA.md, git init) and bind to it:
+Or scaffold a new folio (`index.md`, `leaves/`, git init) and bind to it:
 
 ```bash
 folio create ~/notes/my-folio
@@ -304,7 +304,7 @@ folio skill install                          # later — reuses it
 The archive contains the authored skill unchanged, including `version.js`.
 Run `./version.js --is-cli-match` from the installed skill directory to
 verify that it and `folio` are the same release. By default, installation
-locally enriches the skill description with the bound block's `INDEX.md`
+locally enriches the skill description with the bound block's `index.md`
 description, wrapped in `<contains>...</contains>`. Pass `--no-enrich` to
 remove and disable that enrichment; pass `--enrich` to re-enable it.
 Package-manager installs that omit `version.js` remain usable without a

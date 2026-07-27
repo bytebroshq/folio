@@ -43,53 +43,105 @@ export function extractFrontmatterField(
 	return value;
 }
 
-export function frontmatterCheck(ctx: LintContext): LintIssue[] {
+function syntaxIssues(content: string, file: string): LintIssue[] {
+	if (!content.startsWith("---")) return [];
+	const match = content.match(FRONTMATTER_RE);
+	if (!match) {
+		return [
+			{
+				check: "frontmatter",
+				severity: "error",
+				file,
+				line: 1,
+				message: "opens with '---' but no closing '---' found",
+			},
+		];
+	}
+
 	const issues: LintIssue[] = [];
-
-	for (const file of ctx.files.allMdFiles) {
-		const content = readFileSync(file, "utf-8");
-		if (!content.startsWith("---")) continue;
-
-		const rel = relative(ctx.storeDir, file);
-		const match = content.match(FRONTMATTER_RE);
-		if (!match) {
+	for (const [i, line] of match[1].split("\n").entries()) {
+		if (line.startsWith("\t")) {
 			issues.push({
 				check: "frontmatter",
 				severity: "error",
-				file: rel,
-				line: 1,
-				message: "opens with '---' but no closing '---' found",
+				file,
+				line: i + 2,
+				message: "tab-indented YAML (use spaces)",
 			});
-			continue;
-		}
-
-		const lines = match[1].split("\n");
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			if (line.startsWith("\t")) {
-				issues.push({
-					check: "frontmatter",
-					severity: "error",
-					file: rel,
-					line: i + 2,
-					message: "tab-indented YAML (use spaces)",
-				});
-			} else if (
-				line.trim() !== "" &&
-				!line.includes(":") &&
-				!line.startsWith(" ") &&
-				!line.startsWith("-")
-			) {
-				issues.push({
-					check: "frontmatter",
-					severity: "error",
-					file: rel,
-					line: i + 2,
-					message: `unexpected line: '${line.trim()}'`,
-				});
-			}
+		} else if (
+			line.trim() !== "" &&
+			!line.includes(":") &&
+			!line.startsWith(" ") &&
+			!line.startsWith("-")
+		) {
+			issues.push({
+				check: "frontmatter",
+				severity: "error",
+				file,
+				line: i + 2,
+				message: `unexpected line: '${line.trim()}'`,
+			});
 		}
 	}
+	return issues;
+}
 
+function requiredFieldsIssue(
+	content: string,
+	file: string,
+	fields: string[],
+): LintIssue[] {
+	const issues: LintIssue[] = [];
+	if (!content.match(FRONTMATTER_RE)) {
+		issues.push({
+			check: "frontmatter",
+			severity: "error",
+			file,
+			line: 1,
+			message: `missing required YAML frontmatter (${fields.join(", ")})`,
+		});
+		return issues;
+	}
+	for (const field of fields) {
+		if (!extractFrontmatterField(content, field)) {
+			issues.push({
+				check: "frontmatter",
+				severity: "error",
+				file,
+				message: `missing non-empty required frontmatter field '${field}'`,
+			});
+		}
+	}
+	return issues;
+}
+
+export function frontmatterCheck(ctx: LintContext): LintIssue[] {
+	const issues: LintIssue[] = [];
+	for (const file of ctx.files.allMdFiles) {
+		const rel = relative(ctx.storeDir, file);
+		issues.push(...syntaxIssues(readFileSync(file, "utf-8"), rel));
+	}
+
+	for (const file of ctx.files.contentLeafFiles) {
+		issues.push(
+			...requiredFieldsIssue(
+				readFileSync(file, "utf-8"),
+				relative(ctx.storeDir, file),
+				["type", "title", "description"],
+			),
+		);
+	}
+
+	const rootIndex = ctx.files.indexFiles.find(
+		(file) => relative(ctx.storeDir, file) === "index.md",
+	);
+	if (rootIndex) {
+		issues.push(
+			...requiredFieldsIssue(readFileSync(rootIndex, "utf-8"), "index.md", [
+				"title",
+				"description",
+			]),
+		);
+	}
 	return issues;
 }

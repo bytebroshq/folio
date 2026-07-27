@@ -3,11 +3,10 @@ import type { LintContext, LintIssue } from "../types";
 
 export function namingCheck(ctx: LintContext): LintIssue[] {
 	const issues: LintIssue[] = [];
-	const structural = new Set(ctx.spec.structuralFiles);
+	const names = new Map<string, string[]>();
 
 	for (const file of ctx.files.contentLeafFiles) {
 		const name = basename(file);
-		if (structural.has(name)) continue;
 		if (!ctx.spec.leafFilenamePattern.test(name)) {
 			issues.push({
 				check: "naming",
@@ -16,7 +15,20 @@ export function namingCheck(ctx: LintContext): LintIssue[] {
 				message: `leaf filename must be ${ctx.spec.leafFilenameDescription}`,
 			});
 		}
+		const stem = name.replace(/\.md$/, "");
+		names.set(stem, [...(names.get(stem) ?? []), file]);
 	}
 
+	for (const [stem, files] of names) {
+		if (files.length < 2) continue;
+		for (const file of files) {
+			issues.push({
+				check: "duplicate-leaf-name",
+				severity: "error",
+				file: relative(ctx.storeDir, file),
+				message: `leaf name '${stem}' must be unique across the block`,
+			});
+		}
+	}
 	return issues;
 }

@@ -34,9 +34,9 @@ function unquote(value: string): string {
 	return value;
 }
 
-/** Return the optional one-line description authored in a block's INDEX.md. */
+/** Return the required description authored in a block's root index.md. */
 export function readIndexDescription(repoRoot: string): string | null {
-	const indexPath = join(repoRoot, "INDEX.md");
+	const indexPath = join(repoRoot, "index.md");
 	if (!existsSync(indexPath)) return null;
 	const lines = readFileSync(indexPath, "utf-8").split("\n");
 	const line = descriptionLine(lines);

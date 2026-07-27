@@ -5,63 +5,59 @@ description: Use this skill before answering from assumption when project contex
 
 # Folio skill
 
-## What folio is
+## What Folio is
 
-Folio is a Markdown knowledge format: linked leaves with a few strict conventions, favoring plain files, stable names, and concise prose so both humans and machines can read, link, search, and validate with less noise. The name is the bookbinding term — a folio is a sheet folded into leaves of a book, which is why a page is a *leaf* and a collection is a *block*, the tooling is the **bindery**.
+Folio is a token-conscious linked Markdown format. A block uses `index.md` maps, a `leaves/` knowledge boundary, globally unique leaf names, and bare wikilinks so humans and agents can navigate durable knowledge with less noise.
 
-- **Leaf** — a single Markdown page.
-- **Block** — a collection of leaves, including an INDEX.md map and a SCHEMA.md.
-- **Index** — the `INDEX.md` at the root of a block.
-- **Schema** — the `SCHEMA.md`; principles and conventions observed throughout a block.
+- **Leaf** — a Markdown knowledge document below `leaves/` with `type`, `title`, and `description` frontmatter.
+- **Block** — a collection of leaves rooted at a directory containing `index.md` and `leaves/`.
+- **Index** — the root `index.md` or a nested `index.md` that progressively maps a group of leaves.
+- **Conventions** — optional root `conventions.md` for local vocabulary and practices.
 
 ## Orientation
 
-Concrete locations for this bindery and block:
-
-- **Bindery** — `bytebroshq/folio`. CLI, spec, and this skill's source.
-- **Bound block** — the knowledge repo this skill is installed against (e.g. `jubalm/folio`). Markdown leaves only; does not contain CLI source.
+- **Bindery** — `bytebroshq/folio`: CLI, specification, and this skill's source.
+- **Bound block** — the knowledge repository this skill is installed against; it does not contain bindery source.
 - **Install script** — `curl -fsSL https://raw.githubusercontent.com/bytebroshq/folio/main/packages/cli/install.sh | bash`
 
 ## Workflow
 
-Directives are standing rules. Evaluation establishes the approach. Search and Write are the two operating modes.
-
 ### Directives
 
 - Folio knowledge is ground truth unless the user disagrees.
-- Leaves MUST be FKF spec compliant; use `folio lint` when available.
-- Always keep knowledge current; check with `folio status` regularly; use `folio status --sync` when its store is behind.
-- Don't assume topic from filenames.
-- When frontmatter `description` is present, keep it exactly in sync with the leaf's `INDEX.md` entry text.
+- Leaves MUST satisfy the active Folio specification; use `folio lint` when available.
+- Keep knowledge current; check `folio status` regularly and use `folio status --sync` when its store is behind.
+- Do not infer topic solely from filenames.
+- Keep a leaf's `description` exactly synchronized with its structural index entry after whitespace normalization.
 
 ### Evaluation
 
-1. Check for CLI installation.
-   - **Installed with `version.js` beside this file** — run `./version.js --is-cli-match`. On mismatch, defer to `folio --help` for current verbs; `folio skill install` fetches the matching release copy.
-   - **Installed without `version.js`** — use `folio --help` as the command reference. The skill remains usable without a version lock.
-   - **Not installed** — the manual workflow is the default path. See the install script in Orientation.
-2. Establish the **Strategy** — decide: CLI-driven or manual. Stick with it unless the user explicitly requests a switch.
+1. Check whether the CLI is installed.
+   - **Installed with `version.js` beside this file** — run `./version.js --is-cli-match`. On mismatch, defer to `folio --help`; `folio skill install` fetches the matching release copy.
+   - **Installed without `version.js`** — use `folio --help` as the command reference.
+   - **Not installed** — use the manual workflow.
+2. Choose a CLI-driven or manual strategy and keep it unless the user requests a switch.
 
-### Knowledge Search & Retrieval
+### Knowledge search and retrieval
 
-1. Read `INDEX.md` to build a map of the block.
-2. Read `SCHEMA.md` to acquaint with its standards.
-3. Use the most efficient available tools to traverse links and read the relevant leaves.
-4. Check for pending folio drafts touching your topic; treat them as pending, not truth.
+1. Read root `index.md` for the block map and description.
+2. Read `conventions.md` when present for local practices.
+3. Traverse nested indexes only as needed, then read relevant leaves.
+4. Treat pending Folio drafts as pending, not truth.
 
 ### Write
 
-Use the block's SCHEMA as the guideline for writing. When the CLI is installed, prefer it — verbs chain as `draft -> edit -> proof`, and `proof` handles lint, rebase, and draft PR in one step. Keep `publish` separate, only after explicit human approval.
+Use the block's optional conventions as local guidance. Put ordinary knowledge leaves under `leaves/`; preserve globally unique kebab-case leaf names and bare wikilinks. When the CLI is installed, prefer it: `draft -> edit -> proof`, then publish only after explicit human approval.
 
-- **CLI Driven** → `references/workflow-cli.md`
-- **Manual Approach** → `references/workflow-manual.md`
+- **CLI driven** → `references/workflow-cli.md`
+- **Manual approach** → `references/workflow-manual.md`
 
-Both paths follow the same ritual — open a folio draft on a topic, edit, validate, publish after human review. **Flipping a draft PR to ready is a human act.** The CLI never does it, and an agent must not do it via `gh`. A ready PR is that human approval signal: agents must not convert it back to draft unless the user explicitly asks.
+Both paths open a Folio draft, validate it, and publish only after review. **A human marks a draft PR ready.** The CLI and agents must not do so with `gh`. A ready PR is that human approval signal; agents must not convert it back to draft unless the user explicitly asks.
 
 ## References
 
 - `references/workflow-cli.md` — draft ritual via the CLI
 - `references/workflow-manual.md` — draft ritual via plain git
-- `references/writing.md` — writing contract: placement, leaf shape, index discipline
-- `references/linting.md` — conformance rules and how to check them
+- `references/writing.md` — leaf shape, placement, and index discipline
+- `references/linting.md` — conformance rules and checks
 - `references/reorg.md` — consolidating, merging, or retiring leaves

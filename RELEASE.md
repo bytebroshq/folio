@@ -53,7 +53,7 @@ archive.
 `folio skill install` downloads the checksum-verified `folio-skill.tar.gz`
 asset matching its own CLI version. The archive contains the authored skill,
 including its `version.js` lock checker. By default it locally enriches the
-installed `SKILL.md` description with the bound block's `INDEX.md` description
+installed `SKILL.md` description with the bound block's `index.md` description
 inside `<contains>...</contains>`; `--no-enrich` removes and disables that
 local enrichment. The command owns only files listed in its
 `.folio-skill-manifest.json` manifest. It overwrites current archive files on
