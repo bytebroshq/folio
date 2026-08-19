@@ -180,7 +180,19 @@ vs main. Chain them with `&&`, naming the topic once:
 folio proof my-topic
 ```
 
-Use `-m <message>` when the change needs an intentional, polished public summary. The message becomes the commit message; with PR strategy, its first line becomes the PR title and the full message becomes the PR body. On a subsequent proof, supplying `-m` intentionally replaces the existing PR title and body. Omit `-m` for routine follow-up proofs: Folio uses `amend: <topic>` for the commit and preserves existing PR metadata.
+Use `-m <message>` when the change needs an intentional, polished public summary. The message becomes the commit message; with PR strategy, its first line becomes the PR title and the full message becomes the PR body. On a subsequent proof, supplying `-m` intentionally replaces the existing PR title and body. Omit `-m` for routine follow-up proofs: Folio uses `amend: <topic>` for the commit and preserves existing PR metadata. When invoking Folio through a shell, pass messages containing Markdown code spans or shell substitutions as one shell-safe argument. Do not use double quotes for those messages: the invoking shell may evaluate backticks or `$()` before Folio starts.
+
+```sh
+# Bad: the invoking shell may evaluate the Markdown code span.
+folio proof topic -m "Document `folio proof` behavior"
+
+# Good: single quotes pass the message literally.
+folio proof topic -m 'Document `folio proof` behavior'
+
+# Good for a longer message.
+message='Document `folio proof` behavior'
+folio proof topic -m "$message"
+```
 
 Publish — merges into main (pr strategy: only once the PR is marked ready;
 merge strategy: squash-merges locally):

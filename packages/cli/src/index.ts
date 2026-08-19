@@ -69,7 +69,7 @@ const COMMAND_HELP: Record<string, string> = {
 	bind: `Usage: folio bind <owner/repo> [path] [--remote|--local] [--web] [--force]\n\nBind a remote Folio repository or an existing local repository.`,
 	create: `Usage: folio create <path> [--force]\n\nCreate a new local Folio repository and bind to it.`,
 	draft: `Usage: folio draft <topic> [--force]\n\nStart or resume a draft. --force restarts a draft already published.`,
-	proof: `Usage: folio proof <topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and update the draft PR or local diff.\n\nWithout -m, routine follow-up proofs preserve an existing PR title and body.\nUse -m for an intentional, polished message; it updates the commit and PR metadata.`,
+	proof: `Usage: folio proof <topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and update the draft PR or local diff.\n\nWithout -m, routine follow-up proofs preserve an existing PR title and body.\nUse -m for an intentional, polished message; it updates the commit and PR metadata.\nWhen invoking through a shell, pass messages with Markdown code spans or shell substitutions as one shell-safe argument.`,
 	publish: `Usage: folio publish <topic>\n\nMerge a ready draft PR, or publish a local-strategy draft.`,
 	drop: `Usage: folio drop <topic> [--force]\n\nDiscard a draft. --force confirms deletion when local edits or a PR exist.`,
 	list: `Usage: folio list\n\nList drafts in the bound Folio.`,

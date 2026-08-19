@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { proofMessage, proofMetadataAction } from "./commands";
+import { runFile } from "./git";
 
 const homes: string[] = [];
 
@@ -72,6 +73,19 @@ describe("command help", () => {
 });
 
 describe("proof message semantics", () => {
+	test("preserves shell syntax when passing an argument", () => {
+		const message =
+			'Document `folio proof` and $(echo unsafe) without "shell" changes\nKeep O\'Reilly intact';
+		const result = runFile(process.execPath, [
+			"-e",
+			"process.stdout.write(process.argv[1] ?? '')",
+			message,
+		]);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toBe(message);
+	});
+
 	test("defaults to the topic amendment message without -m", () => {
 		expect(proofMessage("my-topic", [])).toEqual({
 			message: "amend: my-topic",
