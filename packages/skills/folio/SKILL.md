@@ -54,6 +54,8 @@ Use the block's optional conventions as local guidance. Put ordinary knowledge l
 
 Both paths open a Folio draft, validate it, and publish only after review. **A human marks a draft PR ready.** The CLI and agents must not do so with `gh`. A ready PR is that human approval signal; agents must not convert it back to draft unless the user explicitly asks.
 
+When proofing, use `-m <message>` sparingly. Use it for a polished change summary that should become the commit message and, with PR strategy, the PR title/body. It intentionally replaces existing PR metadata on a subsequent proof. Omit `-m` for routine follow-up proofs so manually edited PR title/body content is preserved.
+
 ## References
 
 - `references/workflow-cli.md` — draft ritual via the CLI
