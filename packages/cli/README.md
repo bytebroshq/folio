@@ -180,6 +180,13 @@ vs main. Chain them with `&&`, naming the topic once:
 folio proof my-topic
 ```
 
+Use `-m <message>` when the change needs an intentional, polished public
+summary. The message becomes the commit message; with PR strategy, its first
+line becomes the PR title and the full message becomes the PR body. On a
+subsequent proof, supplying `-m` intentionally replaces the existing PR title
+and body. Omit `-m` for routine follow-up proofs: Folio uses `amend: <topic>`
+for the commit and preserves existing PR metadata.
+
 Publish — merges into main (pr strategy: only once the PR is marked ready;
 merge strategy: squash-merges locally):
 

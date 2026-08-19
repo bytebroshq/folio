@@ -28,6 +28,15 @@ Use these verbs instead of recreating their steps with Git. Reach for Git only w
 6. Run `folio publish <topic>`.
 7. Run `folio status` to confirm the resulting state.
 
+### Proof messages
+
+Use `folio proof <topic> -m "<message>"` when you have an intentional,
+polished summary of the amendment. The message is used for the commit; with
+PR strategy, its first line is the PR title and the full message is the PR
+body. Supplying `-m` on a later proof intentionally replaces the existing PR
+title and body. For routine follow-up proofs, omit `-m`: Folio uses the
+default `amend: <topic>` commit message and preserves existing PR metadata.
+
 ## Conditions
 
 - Pass the topic explicitly for interactive work.

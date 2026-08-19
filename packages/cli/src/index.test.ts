@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { proofMessage, proofMetadataAction } from "./commands";
 
 const homes: string[] = [];
 
@@ -68,4 +69,36 @@ describe("command help", () => {
 		expect(output(result)).not.toContain("Usage:");
 		expect(error(result)).toContain("Worktree for 'topic' not found");
 	});
+});
+
+describe("proof message semantics", () => {
+	test("defaults to the topic amendment message without -m", () => {
+		expect(proofMessage("my-topic", [])).toEqual({
+			message: "amend: my-topic",
+			explicit: false,
+		});
+	});
+
+	test("marks -m as an intentional message", () => {
+		expect(
+			proofMessage("my-topic", ["-m", "Improve the amendment summary"]),
+		).toEqual({
+			message: "Improve the amendment summary",
+			explicit: true,
+		});
+	});
+
+	test.each([
+		["create", false, false],
+		["create", false, true],
+		["preserve", true, false],
+		["update", true, true],
+	] as const)(
+		"chooses $expected for existing PR=$hasExistingPR and explicit message=$hasExplicitMessage",
+		(expected, hasExistingPR, hasExplicitMessage) => {
+			expect(proofMetadataAction(hasExistingPR, hasExplicitMessage)).toBe(
+				expected,
+			);
+		},
+	);
 });

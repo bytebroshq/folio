@@ -682,13 +682,26 @@ function withMainLock<T>(fn: () => T): T {
 
 // ── proof ──────────────────────────────────────────────────────────
 
-function commitDraftChanges(path: string, slug: string, rest: string[]): void {
-	let msg = `amend: ${slug}`;
+export function proofMessage(
+	slug: string,
+	rest: string[],
+): { message: string; explicit: boolean } {
 	const mIdx = rest.indexOf("-m");
 	if (mIdx >= 0 && mIdx + 1 < rest.length) {
-		msg = rest[mIdx + 1] as string;
+		return { message: rest[mIdx + 1] as string, explicit: true };
 	}
+	return { message: `amend: ${slug}`, explicit: false };
+}
 
+export function proofMetadataAction(
+	hasExistingPR: boolean,
+	hasExplicitMessage: boolean,
+): "create" | "update" | "preserve" {
+	if (!hasExistingPR) return "create";
+	return hasExplicitMessage ? "update" : "preserve";
+}
+
+function commitDraftChanges(path: string, msg: string): void {
 	run(`git -C "${path}" add -A`);
 	const commit = run(
 		`git -C "${path}" commit -m "${msg.replace(/"/g, '\\"')}" --quiet`,
@@ -705,13 +718,14 @@ export function cmdProof(args: string[]): void {
 	if (!local) ensureGh();
 
 	const { slug, path, rest } = resolveDraft("proof", args, ["-m"], true);
+	const proof = proofMessage(slug, rest);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
 		throw new Error(`Draft '${slug}' is not on a branch.`);
 	}
 
 	if (draftHasChanges(path)) {
-		commitDraftChanges(path, slug, rest);
+		commitDraftChanges(path, proof.message);
 	}
 
 	const lintResult = lint(path, { spec: "folio" });
@@ -764,14 +778,20 @@ export function cmdProof(args: string[]): void {
 	}
 
 	const prNum = findOpenPR(remote, branch);
-	const msg = run(`git -C "${path}" log -1 --format=%B`, {
-		quiet: true,
-	}).stdout;
-	const title = (msg.split("\n")[0] || `amend: ${slug}`).replace(/"/g, '\\"');
+	const msg =
+		run(`git -C "${path}" log -1 --format=%B`, {
+			quiet: true,
+		}).stdout || proof.message;
+	const prMessage = proof.explicit ? proof.message : msg;
+	const title = (prMessage.split("\n")[0] || `amend: ${slug}`).replace(
+		/"/g,
+		'\\"',
+	);
 
-	if (!prNum) {
+	const metadataAction = proofMetadataAction(Boolean(prNum), proof.explicit);
+	if (metadataAction === "create") {
 		const prResult = run(
-			`gh pr create --repo "${remote}" --base main --head "${branch}" --draft --title "${title}" --body "${msg.replace(/"/g, '\\"')}"`,
+			`gh pr create --repo "${remote}" --base main --head "${branch}" --draft --title "${title}" --body "${prMessage.replace(/"/g, '\\"')}"`,
 			{ quiet: true },
 		);
 		if (prResult.exitCode !== 0) {
@@ -780,11 +800,14 @@ export function cmdProof(args: string[]): void {
 		const newPrNum = prResult.stdout.match(/(\d+)$/)?.[0] || "?";
 		console.log(`✓ Proofed '${slug}' — draft PR #${newPrNum} opened`);
 		console.log(`  https://github.com/${remote}/pull/${newPrNum}`);
-	} else {
+	} else if (metadataAction === "update") {
 		run(
-			`gh pr edit --repo "${remote}" ${prNum} --title "${title}" --body "${msg.replace(/"/g, '\\"')}" 2>/dev/null || true`,
+			`gh pr edit --repo "${remote}" ${prNum} --title "${title}" --body "${prMessage.replace(/"/g, '\\"')}" 2>/dev/null || true`,
 			{ quiet: true },
 		);
+		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);
+		console.log(`  https://github.com/${remote}/pull/${prNum}`);
+	} else {
 		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);
 		console.log(`  https://github.com/${remote}/pull/${prNum}`);
 	}
