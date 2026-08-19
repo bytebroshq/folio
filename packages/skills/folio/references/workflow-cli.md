@@ -32,6 +32,18 @@ Use these verbs instead of recreating their steps with Git. Reach for Git only w
 
 Use `folio proof <topic> -m '<message>'` when you have an intentional, polished summary of the amendment. The message is used for the commit; with PR strategy, its first line is the PR title and the full message is the PR body. Supplying `-m` on a later proof intentionally replaces the existing PR title and body. For routine follow-up proofs, omit `-m`: Folio uses the default `amend: <topic>` commit message and preserves existing PR metadata. Single-quote shell messages containing Markdown code spans or shell substitutions, and escape any embedded single quotes.
 
+```sh
+# Bad: the invoking shell may evaluate the Markdown code span.
+folio proof topic -m "Document `folio proof` behavior"
+
+# Good: single quotes pass the message literally.
+folio proof topic -m 'Document `folio proof` behavior'
+
+# Good for a longer message.
+message='Document `folio proof` behavior'
+folio proof topic -m "$message"
+```
+
 ## Conditions
 
 - Pass the topic explicitly for interactive work.
