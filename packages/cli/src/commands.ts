@@ -50,6 +50,7 @@ import {
 	mainRef,
 	parseGitHubOrigin,
 	run,
+	runFile,
 	worktreeExists,
 } from "./git";
 import { openBrowser } from "./open";
@@ -703,9 +704,7 @@ export function proofMetadataAction(
 
 function commitDraftChanges(path: string, msg: string): void {
 	run(`git -C "${path}" add -A`);
-	const commit = run(
-		`git -C "${path}" commit -m "${msg.replace(/"/g, '\\"')}" --quiet`,
-	);
+	const commit = runFile("git", ["-C", path, "commit", "-m", msg, "--quiet"]);
 	if (commit.exitCode !== 0) {
 		throw new Error(`Commit failed: ${commit.stderr || commit.stdout}`);
 	}
@@ -783,15 +782,27 @@ export function cmdProof(args: string[]): void {
 			quiet: true,
 		}).stdout || proof.message;
 	const prMessage = proof.explicit ? proof.message : msg;
-	const title = (prMessage.split("\n")[0] || `amend: ${slug}`).replace(
-		/"/g,
-		'\\"',
-	);
+	const title = prMessage.split("\n")[0] || `amend: ${slug}`;
 
 	const metadataAction = proofMetadataAction(Boolean(prNum), proof.explicit);
 	if (metadataAction === "create") {
-		const prResult = run(
-			`gh pr create --repo "${remote}" --base main --head "${branch}" --draft --title "${title}" --body "${prMessage.replace(/"/g, '\\"')}"`,
+		const prResult = runFile(
+			"gh",
+			[
+				"pr",
+				"create",
+				"--repo",
+				remote,
+				"--base",
+				"main",
+				"--head",
+				branch,
+				"--draft",
+				"--title",
+				title,
+				"--body",
+				prMessage,
+			],
 			{ quiet: true },
 		);
 		if (prResult.exitCode !== 0) {
@@ -801,8 +812,19 @@ export function cmdProof(args: string[]): void {
 		console.log(`✓ Proofed '${slug}' — draft PR #${newPrNum} opened`);
 		console.log(`  https://github.com/${remote}/pull/${newPrNum}`);
 	} else if (metadataAction === "update") {
-		run(
-			`gh pr edit --repo "${remote}" ${prNum} --title "${title}" --body "${prMessage.replace(/"/g, '\\"')}" 2>/dev/null || true`,
+		runFile(
+			"gh",
+			[
+				"pr",
+				"edit",
+				"--repo",
+				remote,
+				prNum,
+				"--title",
+				title,
+				"--body",
+				prMessage,
+			],
 			{ quiet: true },
 		);
 		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);

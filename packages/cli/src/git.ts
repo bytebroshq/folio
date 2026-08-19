@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
 	AMEND_DIR,
@@ -42,6 +42,25 @@ export function run(
 			exitCode: e.status ?? 1,
 		};
 	}
+}
+
+/** Run a command with argv boundaries preserved; never invoke a shell. */
+export function runFile(
+	command: string,
+	args: string[],
+	opts?: { cwd?: string; quiet?: boolean },
+): { stdout: string; stderr: string; exitCode: number } {
+	const result = spawnSync(command, args, {
+		encoding: "utf-8",
+		cwd: opts?.cwd,
+		stdio: "pipe",
+		maxBuffer: 1024 * 1024,
+	});
+	return {
+		stdout: (result.stdout || "").toString().trim(),
+		stderr: (result.stderr || result.error?.message || "").toString().trim(),
+		exitCode: result.status ?? 1,
+	};
 }
 
 export function gh(
