@@ -29,6 +29,7 @@ Folio is a token-conscious linked Markdown format. A block uses `index.md` maps,
 - Keep knowledge current; check `folio status` regularly and use `folio status <binding> --sync` when one store is behind.
 - Do not infer topic solely from filenames.
 - Keep a leaf's `description` exactly synchronized with its structural index entry after whitespace normalization.
+- The `folio` CLI is directory-agnostic. No need to `cd` into the block's path to run commands.
 
 ### Evaluation
 
