@@ -109,7 +109,7 @@ Edit files here:
 ~/.config/folio/stores/amendments/<binding-id>/my-topic/
 ```
 
-Every draft mutation requires the qualified `alias:topic` identity. The alias
+Every draft mutation requires the qualified `binding:topic` identity. The binding
 selects the repository and amendment worktree together; the same topic may
 exist independently in multiple bindings. `$FOLIO_DRAFT`, when used, must
 also contain the qualified identity.
@@ -197,28 +197,33 @@ folio drop personal:my-topic --force
 
 ## Commands
 
+`<binding>` is a short, unique name for a configured Folio block (for example, `bytebros`).
+
 ```text
-folio bind <alias> --github <owner/repo> [--path <path>] [--description <text>]
+folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>]
                                       add a named GitHub block binding
-folio bind <alias> --path <path>      add a named local block binding
-folio create <alias> --path <path>    scaffold a new folio and bind to it
+folio bind <binding> --path <path> [--description <text>]
+                                      add a named local block binding
+folio create <binding> --path <path> [--description <text>]
+                                      scaffold a new folio and bind to it
 folio bindings                       list configured bindings
-folio binding rename <old> <new>      rename an alias without moving state
-folio unbind <alias>                  remove a binding, preserving files
-folio map [<alias>] [--json]           show the LLM-oriented routing map
-folio draft <alias>:<topic>            start or resume a draft (--force to restart)
-folio proof <alias>:<topic>            commit, lint, rebase, and proof a draft
-folio publish <alias>:<topic>          merge the draft into main
-folio status [<alias>] [--sync]        status all or one; sync requires an alias
+folio binding rename <binding> <new-binding>
+                                      rename a binding without moving state
+folio unbind <binding>                  remove a binding, preserving files
+folio map [<binding>] [--json]           show the LLM-oriented routing map
+folio draft <binding>:<topic>            start or resume a draft (--force to restart)
+folio proof <binding>:<topic>            commit, lint, rebase, and proof a draft
+folio publish <binding>:<topic>          merge the draft into main
+folio status [<binding>] [--sync]        status all or one; sync requires a binding
 folio update [--version X.Y.Z] [--yes] check or install a stable CLI release
-folio drafts [<alias>]                list drafts for all or one binding
-folio drop <alias>:<topic> --force    delete a draft and its remote branch
+folio drafts [<binding>]                list drafts for all or one binding
+folio drop <binding>:<topic> --force    delete a draft and its remote branch
 folio web                            disabled; use `folio map`
 folio config                         show config
 folio config <key> <value>           set config
 folio lint                            check every binding main
-folio lint <alias>                   check one binding main
-folio lint <alias>:<topic>            check one qualified draft
+folio lint <binding>                   check one binding main
+folio lint <binding>:<topic>            check one qualified draft
 folio skill install <path>           download the matching Folio skill into <path>, remembering it
 folio skill install --no-enrich      install without global routing enrichment
 folio skill install                  re-run against the remembered path

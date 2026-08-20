@@ -39,20 +39,23 @@ folio — knowledge management CLI
 
 Usage:
   folio --version | -v             Print the CLI version
-  folio bind <alias> --github <owner/repo> [--path <path>]  Add a GitHub block binding
-  folio bind <alias> --path <path>                          Add a local block binding
-  folio create <alias> --path <path>                       Scaffold and bind a block
+  folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>]
+                                                    Add a GitHub block binding
+  folio bind <binding> --path <path> [--description <text>]
+                                                    Add a local block binding
+  folio create <binding> --path <path> [--description <text>]
+                                                    Scaffold and bind a block
   folio bindings                       List configured block bindings
-  folio binding rename <old> <new>      Rename a binding alias
-  folio unbind <alias>                  Remove a binding, preserving files
-  folio map [<alias>] [--json]     Show the LLM-oriented block routing map
-  folio draft <alias>:<topic>      Start or resume a draft (--force to restart)
-  folio proof <alias>:<topic>      Commit dirty work, lint, rebase, and proof a draft
-  folio publish <alias>:<topic>    Merge the qualified draft into main
-  folio status [<alias>] [--sync] Fleet dashboard; --sync requires one alias
+  folio binding rename <binding> <new-binding> Rename a binding without moving state
+  folio unbind <binding>                  Remove a binding, preserving files
+  folio map [<binding>] [--json]     Show the LLM-oriented block routing map
+  folio draft <binding>:<topic>      Start or resume a draft (--force to restart)
+  folio proof <binding>:<topic>      Commit dirty work, lint, rebase, and proof a draft
+  folio publish <binding>:<topic>    Merge the qualified draft into main
+  folio status [<binding>] [--sync] Fleet dashboard; --sync requires one binding
   folio update [--version X.Y.Z] [--yes]  Check or install a stable CLI release
-  folio drop <alias>:<topic> --force Delete a draft (local + remote)
-  folio drafts [<alias>]           List drafts for all blocks or one block
+  folio drop <binding>:<topic> --force Delete a draft (local + remote)
+  folio drafts [<binding>]           List drafts for all blocks or one block
   folio config                     Show global config
   folio config <key> <value>       Set config value
   folio web                        Disabled; use folio map for block routing
@@ -63,9 +66,10 @@ Usage:
   folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits global routing)
 
 Edits go in the binding-specific amendment worktree under the configured amendments root.
-Flow: draft <alias>:<topic> → edit → proof <alias>:<topic> → publish <alias>:<topic>.
+A binding is a short, unique name for a configured Folio block (for example, bytebros).
+Flow: draft <binding>:<topic> → edit → proof <binding>:<topic> → publish <binding>:<topic>.
 
-Every draft verb requires a qualified alias:topic identity, supplied explicitly
+Every draft verb requires a qualified binding:topic identity, supplied explicitly
 or through $FOLIO_DRAFT. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
   passing the qualified identity explicitly. Chain steps with && (e.g. folio
@@ -74,20 +78,20 @@ single-purpose.
 `;
 
 const COMMAND_HELP: Record<string, string> = {
-	bind: `Usage: folio bind <alias> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]\n\nAdd a named Folio block binding.`,
+	bind: `Usage: folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]\n\nAdd a named Folio block binding. A binding is a short, unique name such as bytebros.`,
 	bindings: `Usage: folio bindings\n\nList configured block bindings.`,
-	binding: `Usage: folio binding rename <old> <new>\n\nRename a binding without moving its checkout or amendments.`,
-	map: `Usage: folio map [<alias>] [--json]\n\nShow the LLM-oriented routing map for all blocks or one block.`,
-	create: `Usage: folio create <alias> --path <path> [--description <text>]\n\nCreate a new local Folio repository and bind to it.`,
-	draft: `Usage: folio draft <alias>:<topic> [--force]\n\nStart or resume a qualified draft.`,
-	proof: `Usage: folio proof <alias>:<topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and proof a qualified draft.`,
-	publish: `Usage: folio publish <alias>:<topic>\n\nMerge a ready qualified draft.`,
-	drop: `Usage: folio drop <alias>:<topic> [--force]\n\nDiscard a qualified draft.`,
-	drafts: `Usage: folio drafts [<alias>]\n\nList drafts for all blocks or one block.`,
-	status: `Usage: folio status [<alias>] [--sync]\n\nShow all bindings or one binding. --sync requires exactly one alias.`,
+	binding: `Usage: folio binding rename <binding> <new-binding>\n\nRename a binding without moving its checkout or amendments.`,
+	map: `Usage: folio map [<binding>] [--json]\n\nShow the LLM-oriented routing map for all blocks or one block.`,
+	create: `Usage: folio create <binding> --path <path> [--description <text>]\n\nCreate a new local Folio repository and bind to it.`,
+	draft: `Usage: folio draft <binding>:<topic> [--force]\n\nStart or resume a qualified draft.`,
+	proof: `Usage: folio proof <binding>:<topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and proof a qualified draft.`,
+	publish: `Usage: folio publish <binding>:<topic>\n\nMerge a ready qualified draft.`,
+	drop: `Usage: folio drop <binding>:<topic> [--force]\n\nDiscard a qualified draft.`,
+	drafts: `Usage: folio drafts [<binding>]\n\nList drafts for all blocks or one block.`,
+	status: `Usage: folio status [<binding>] [--sync]\n\nShow all bindings or one binding. --sync requires exactly one binding.`,
 	update: `Usage: folio update [--version <X.Y.Z>] [--yes]\n\nCheck for or install a stable CLI release. --yes permits a non-interactive update.`,
 	config: `Usage: folio config [<key> [<value>]]\n\nShow all configuration, read one key, or set one key.`,
-	unbind: `Usage: folio unbind <alias>\n\nRemove a binding while preserving its checkout and amendments.`,
+	unbind: `Usage: folio unbind <binding>\n\nRemove a binding while preserving its checkout and amendments.`,
 	web: `Usage: folio web\n\nDisabled; use folio map for block routing.`,
 	lint: `Usage: folio lint [<topic>] [--spec <name>] [--json] [--strict]\n\nCheck Folio integrity for a draft or the bound main store.`,
 	skill: `Usage: folio skill install [path] [--enrich|--no-enrich]\n\nManage the installed Folio agent skill.`,

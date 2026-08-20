@@ -60,6 +60,18 @@ afterEach(() => {
 });
 
 describe("command help", () => {
+	test("root help documents binding names and descriptions", () => {
+		const result = runCli(["--help"]);
+		expect(result.exitCode).toBe(0);
+		expect(output(result)).toContain(
+			"folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>]",
+		);
+		expect(output(result)).toContain(
+			"folio create <binding> --path <path> [--description <text>]",
+		);
+		expect(output(result)).toContain("A binding is a short, unique name");
+	});
+
 	test.each([
 		["bind"],
 		["create"],

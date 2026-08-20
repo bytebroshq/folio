@@ -14,26 +14,26 @@ Use the Folio CLI for Folio work. Its verbs already own the Git steps:
 - `publish` lands reviewed work and cleans up.
 - `drop` deletes the draft branch and worktree.
 - `map` routes a request to one block's authored index.
-- `drafts [alias]` inventories drafts across all blocks or one block.
-- `status [alias]` reports all blocks or one block; `status <alias> --sync` syncs exactly one.
-- `lint` checks every main; `lint <alias>` checks one main; `lint <alias>:<topic>` checks one draft.
+- `drafts [binding]` inventories drafts across all blocks or one block.
+- `status [binding]` reports all blocks or one block; `status <binding> --sync` syncs exactly one.
+- `lint` checks every main; `lint <binding>` checks one main; `lint <binding>:<topic>` checks one draft.
 
 Use these verbs instead of recreating their steps with Git. Reach for Git only when the user requests the manual workflow, no Folio verb covers the job, or the CLI fails.
 
 ## Draft lifecycle
 
-1. Run `folio map`, choose the relevant alias, and read that block's index.
-2. Run `folio status <alias> --sync` to bring that block current.
-3. Run `folio draft <alias>:<topic>`.
+1. Run `folio map`, choose the relevant binding, and read that block's index.
+2. Run `folio status <binding> --sync` to bring that block current.
+3. Run `folio draft <binding>:<topic>`.
 4. Edit only the binding-specific amendment worktree reported by Folio.
-5. Run `folio proof <alias>:<topic>`.
+5. Run `folio proof <binding>:<topic>`.
 6. With `strategy: pr`, wait for human review and ready status.
-7. Run `folio publish <alias>:<topic>`.
-8. Run `folio status <alias>` to confirm the resulting state.
+7. Run `folio publish <binding>:<topic>`.
+8. Run `folio status <binding>` to confirm the resulting state.
 
 ### Proof messages
 
-Use `folio proof <alias>:<topic> -m '<message>'` when you have an intentional, polished summary of the amendment. The message is used for the commit; with PR strategy, its first line is the PR title and the full message is the PR body. Supplying `-m` on a later proof intentionally replaces the existing PR title and body. For routine follow-up proofs, omit `-m`: Folio uses the default `amend: <topic>` commit message and preserves existing PR metadata. Single-quote shell messages containing Markdown code spans or shell substitutions, and escape any embedded single quotes.
+Use `folio proof <binding>:<topic> -m '<message>'` when you have an intentional, polished summary of the amendment. The message is used for the commit; with PR strategy, its first line is the PR title and the full message is the PR body. Supplying `-m` on a later proof intentionally replaces the existing PR title and body. For routine follow-up proofs, omit `-m`: Folio uses the default `amend: <topic>` commit message and preserves existing PR metadata. Single-quote shell messages containing Markdown code spans or shell substitutions, and escape any embedded single quotes.
 
 ```sh
 # Bad: the invoking shell may evaluate the Markdown code span.
@@ -49,10 +49,10 @@ folio proof personal:topic -m "$message"
 
 ## Conditions
 
-- Pass the qualified `alias:topic` identity explicitly for interactive work.
+- Pass the qualified `binding:topic` identity explicitly for interactive work.
 - With `strategy: pr`, `proof` opens or updates a draft PR. A human marks it ready before `publish` squash-merges it.
 - With `strategy: merge`, `proof` shows the rebased diff and `publish` squash-merges locally.
-- `folio drop <alias>:<topic> --force` deletes a draft branch and worktree.
+- `folio drop <binding>:<topic> --force` deletes a draft branch and worktree.
 
 ## Rules
 

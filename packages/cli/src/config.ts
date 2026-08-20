@@ -511,7 +511,7 @@ export function requireSoleBinding(): Binding {
 	if (invocationBinding) return invocationBinding;
 	const entries = Object.entries(getBindings());
 	if (entries.length === 0)
-		throw new Error("No binding configured — run 'folio bind <alias>'.");
+		throw new Error("No binding configured — run 'folio bind <binding>'.");
 	if (entries.length > 1)
 		throw new Error(
 			"Multiple bindings configured — specify a binding explicitly.",
@@ -531,13 +531,13 @@ export function parseQualifiedTopic(identity: string): {
 		identity.indexOf(":", separator + 1) !== -1
 	) {
 		throw new Error(
-			`Draft identity must be qualified as <alias>:<topic> (received '${identity}').`,
+			`Draft identity must be qualified as <binding>:<topic> (received '${identity}').`,
 		);
 	}
 	const alias = identity.slice(0, separator);
 	const topic = identity.slice(separator + 1);
 	if (!/^[a-z0-9][a-z0-9-]*$/.test(alias))
-		throw new Error(`Invalid binding alias '${alias}'.`);
+		throw new Error(`Invalid binding '${alias}'.`);
 	const slug = topicToSlug(topic);
 	if (!slug) throw new Error(`Invalid topic '${topic}'.`);
 	return { alias, topic, slug, binding: getBinding(alias) };

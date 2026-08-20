@@ -18,7 +18,7 @@ Use a reorganization to consolidate overlapping leaves, remove superseded contex
 
 ## Reorganization lifecycle
 
-1. Run `folio status <alias> --sync` for the binding being reorganized.
+1. Run `folio status <binding> --sync` for the binding being reorganized.
 2. Map the topic: read the relevant `index.md` entries and search all leaves that mention it.
 3. Decide the surviving canonical leaves before editing.
 4. Run `folio draft <topic-reorg>`.

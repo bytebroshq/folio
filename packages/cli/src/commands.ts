@@ -76,7 +76,7 @@ export function cmdBind(args: string[]): void {
 	const alias = args.find((a) => !a.startsWith("--"));
 	if (!alias || !/^[a-z0-9][a-z0-9-]*$/.test(alias))
 		throw new Error(
-			"Usage: folio bind <alias> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]",
+			"Usage: folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]",
 		);
 	const value = (flag: string): string | null => {
 		const index = args.indexOf(flag);
@@ -172,7 +172,7 @@ export function cmdCreate(args: string[]): void {
 		: null;
 	if (!alias || !pathArg)
 		throw new Error(
-			"Usage: folio create <alias> --path <path> [--description <text>]",
+			"Usage: folio create <binding> --path <path> [--description <text>]",
 		);
 
 	const abs = resolvePath(pathArg as string);
@@ -221,7 +221,7 @@ export function cmdDraft(args: string[]): void {
 	ensureConfig();
 	const { topic: identity, rest } = extractTopic(args);
 	if (!identity)
-		throw new Error("Usage: folio draft <alias>:<topic> [--force]");
+		throw new Error("Usage: folio draft <binding>:<topic> [--force]");
 	const qualified = parseQualifiedTopic(identity);
 	setBindingContext(qualified.binding);
 	ensureBase();
@@ -320,9 +320,9 @@ export function cmdDraft(args: string[]): void {
 
 /** Usage examples shown in resolveDraft's "no topic" error, per verb. */
 const VERB_EXAMPLES: Record<string, string> = {
-	proof: "folio proof <alias>:<topic>",
-	publish: "folio publish <alias>:<topic>",
-	drop: "folio drop <alias>:<topic> --force",
+	proof: "folio proof <binding>:<topic>",
+	publish: "folio publish <binding>:<topic>",
+	drop: "folio drop <binding>:<topic> --force",
 };
 
 /**
@@ -1177,7 +1177,7 @@ export function cmdStatus(args: string[] = []): void {
 		throw new Error("Usage: folio status [alias] [--sync]");
 	const sync = args.includes("--sync");
 	if (sync && aliases.length === 0)
-		throw new Error("Usage: folio status <alias> --sync");
+		throw new Error("Usage: folio status <binding> --sync");
 	ensureConfig();
 	const config = loadConfig();
 	const selected = Object.entries(config.bindings)
@@ -1248,7 +1248,9 @@ export function cmdBindings(): void {
 		a.localeCompare(b),
 	);
 	if (entries.length === 0) {
-		console.log("No bindings. Run 'folio bind <alias> --github <owner/repo>'.");
+		console.log(
+			"No bindings. Run 'folio bind <binding> --github <owner/repo>'.",
+		);
 		return;
 	}
 	for (const [alias, binding] of entries) {
@@ -1263,7 +1265,7 @@ export function cmdBindingRename(args: string[]): void {
 	const oldAlias = args.find((arg) => !arg.startsWith("--"));
 	const newAlias = args.filter((arg) => !arg.startsWith("--"))[1];
 	if (!oldAlias || !newAlias || !/^[a-z0-9][a-z0-9-]*$/.test(newAlias))
-		throw new Error("Usage: folio binding rename <old> <new>");
+		throw new Error("Usage: folio binding rename <binding> <new-binding>");
 	ensureConfig();
 	const config = loadConfig();
 	const binding = config.bindings[oldAlias];
@@ -1282,7 +1284,7 @@ export function cmdBindingRename(args: string[]): void {
 
 export function cmdUnbind(args: string[]): void {
 	const alias = args.find((arg) => !arg.startsWith("--"));
-	if (!alias) throw new Error("Usage: folio unbind <alias>");
+	if (!alias) throw new Error("Usage: folio unbind <binding>");
 	ensureConfig();
 	const config = loadConfig();
 	const binding = config.bindings[alias];
@@ -1342,7 +1344,7 @@ export function cmdMap(args: string[] = []): void {
 	const json = args.includes("--json");
 	const aliases = args.filter((arg) => !arg.startsWith("--"));
 	if (aliases.length > 1)
-		throw new Error("Usage: folio map [<alias>] [--json]");
+		throw new Error("Usage: folio map [<binding>] [--json]");
 	const entries = mapEntries(aliases[0]);
 	if (json) {
 		console.log(JSON.stringify(entries, null, 2));
