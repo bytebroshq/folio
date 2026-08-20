@@ -26,7 +26,7 @@ Folio is a token-conscious linked Markdown format. A block uses `index.md` maps,
 
 - Folio knowledge is ground truth unless the user disagrees.
 - Leaves MUST satisfy the active Folio specification; use `folio lint` when available.
-- Keep knowledge current; check `folio status` regularly and use `folio status --sync` when its store is behind.
+- Keep knowledge current; check `folio status` regularly and use `folio status <alias> --sync` when one store is behind.
 - Do not infer topic solely from filenames.
 - Keep a leaf's `description` exactly synchronized with its structural index entry after whitespace normalization.
 
@@ -45,9 +45,14 @@ Folio is a token-conscious linked Markdown format. A block uses `index.md` maps,
 3. Traverse nested indexes only as needed, then read relevant leaves.
 4. Treat pending Folio drafts as pending, not truth.
 
+When multiple blocks are configured, run `folio map` first. It is a compact
+routing map, not a search index and not a request to load every block index.
+Choose the relevant alias, then read that block's authored `index.md` and
+traverse only the needed indexes and leaves.
+
 ### Write
 
-Use the block's optional conventions as local guidance. Put ordinary knowledge leaves under `leaves/`; preserve globally unique kebab-case leaf names and bare wikilinks. When the CLI is installed, prefer it: `draft -> edit -> proof`, then publish only after explicit human approval.
+Use the block's optional conventions as local guidance. Put ordinary knowledge leaves under `leaves/`; preserve globally unique kebab-case leaf names and bare wikilinks. When the CLI is installed, prefer it: `folio draft <alias>:<topic> -> edit -> folio proof <alias>:<topic>`, then publish only after explicit human approval. Use `folio status <alias> --sync` for one block and `folio drafts` for inventory. `folio web` is disabled.
 
 - **CLI driven** → `references/workflow-cli.md`
 - **Manual approach** → `references/workflow-manual.md`

@@ -46,16 +46,18 @@ version change and asks before applying it; without a TTY it reports only.
 `folio update --yes` applies it without the prompt, and `--version X.Y.Z`
 selects an explicit stable release. Updating preserves bindings and config,
 then refreshes the skill at the recorded skill path from the matching release
-archive.
+archive. The update path also bootstraps the v2 named-binding registry and
+reports the migration; the installer performs the same bootstrap on first
+invocation.
 
 ## Skill synchronization
 
 `folio skill install` downloads the checksum-verified `folio-skill.tar.gz`
 asset matching its own CLI version. The archive contains the authored skill,
 including its `version.js` lock checker. By default it locally enriches the
-installed `SKILL.md` description with the bound block's `index.md` description
-inside `<contains>...</contains>`; `--no-enrich` removes and disables that
-local enrichment. The command owns only files listed in its
+installed `SKILL.md` description with the global `folio map` routing metadata
+inside `<contains>...</contains>`; `--no-enrich` omits that local enrichment.
+The command owns only files listed in its
 `.folio-skill-manifest.json` manifest. It overwrites current archive files on
 an explicit install and removes obsolete managed files only if they still match
 their recorded hash.

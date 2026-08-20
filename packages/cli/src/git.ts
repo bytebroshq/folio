@@ -1,14 +1,15 @@
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import {
 	AMEND_DIR,
-	BASE_REPO,
+	type Binding,
 	baseRepo,
+	bindingAmendmentsPath,
 	getPath,
 	getRemote,
 	getStrategy,
 	hasRemote,
-	readConfig,
 } from "./config";
 
 // ── Shell ──────────────────────────────────────────────────────────
@@ -64,12 +65,25 @@ export function runFile(
 }
 
 export function gh(
-	args: string,
+	args: string[],
 	remote?: string,
 ): { stdout: string; stderr: string; exitCode: number } {
 	const repo = remote ?? getRemote();
-	return run(`gh ${args} --repo "${repo}"`, { quiet: true });
+	return runFile("gh", [...args, "--repo", repo], { quiet: true });
 }
+
+export function gitFile(
+	args: string[],
+	opts?: { cwd?: string; quiet?: boolean },
+): { stdout: string; stderr: string; exitCode: number } {
+	return runFile("git", args, opts);
+}
+
+export type CommandResult = {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+};
 
 // ── Base repo ──────────────────────────────────────────────────────
 
@@ -86,21 +100,26 @@ export function ensureBase(remote?: string): void {
 	if (path) {
 		if (!existsSync(`${path}/.git`)) {
 			// A remote-backed checkout at a custom path can be recreated.
-			const repo = remote ?? readConfig("remote");
+			const repo = remote ?? getRemote();
 			if (!repo) {
 				throw new Error(
 					`Bound local folio missing at ${path}. Re-run 'folio bind <path>'.`,
 				);
 			}
 			console.log(`Recreating checkout of ${repo} at ${path}...`);
-			const r = run(`git clone --quiet git@github.com:${repo}.git "${path}"`);
+			const r = gitFile([
+				"clone",
+				"--quiet",
+				`git@github.com:${repo}.git`,
+				path,
+			]);
 			if (r.exitCode !== 0) {
 				throw new Error(
 					`Failed to clone ${repo} into ${path}. Check access and try again.`,
 				);
 			}
 		}
-		run(`git -C "${path}" config extensions.worktreeConfig true`, {
+		gitFile(["-C", path, "config", "extensions.worktreeConfig", "true"], {
 			quiet: true,
 		});
 		return;
@@ -114,11 +133,16 @@ export function ensureBase(remote?: string): void {
 	}
 
 	console.log("Initializing shared clone...");
-	const r = run(`git clone --quiet git@github.com:${repo}.git "${BASE_REPO}"`);
+	const r = gitFile([
+		"clone",
+		"--quiet",
+		`git@github.com:${repo}.git`,
+		baseRepo(),
+	]);
 	if (r.exitCode !== 0) {
 		throw new Error(`Failed to clone ${repo}. Check access and try again.`);
 	}
-	run(`git -C "${BASE_REPO}" config extensions.worktreeConfig true`, {
+	gitFile(["-C", baseRepo(), "config", "extensions.worktreeConfig", "true"], {
 		quiet: true,
 	});
 }
@@ -127,21 +151,23 @@ export function mainExists(): boolean {
 	return existsSync(`${baseRepo()}/.git`);
 }
 
-export function fetchMain(): void {
-	if (!hasRemote()) return;
-	run(`git -C "${baseRepo()}" fetch origin main --quiet`, { quiet: true });
+export function fetchMain(): CommandResult {
+	if (!hasRemote()) return { stdout: "", stderr: "", exitCode: 0 };
+	return gitFile(["-C", baseRepo(), "fetch", "origin", "main", "--quiet"], {
+		quiet: true,
+	});
 }
 
 export function currentBranch(): string {
-	return run(`git -C "${baseRepo()}" rev-parse --abbrev-ref HEAD`, {
+	return gitFile(["-C", baseRepo(), "rev-parse", "--abbrev-ref", "HEAD"], {
 		quiet: true,
 	}).stdout;
 }
 
 export function behindCount(): number {
 	if (!hasRemote()) return 0;
-	const result = run(
-		`git -C "${baseRepo()}" rev-list --count main..origin/main 2>/dev/null || echo 0`,
+	const result = gitFile(
+		["-C", baseRepo(), "rev-list", "--count", "main..origin/main"],
 		{ quiet: true },
 	);
 	return Number.parseInt(result.stdout || "0", 10);
@@ -149,7 +175,7 @@ export function behindCount(): number {
 
 /** Parse a repo's `origin` URL for a GitHub owner/repo, if any. */
 export function parseGitHubOrigin(repoPath: string): string | null {
-	const url = run(`git -C "${repoPath}" remote get-url origin 2>/dev/null`, {
+	const url = gitFile(["-C", repoPath, "remote", "get-url", "origin"], {
 		quiet: true,
 	}).stdout;
 	const match = url.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
@@ -160,39 +186,45 @@ export function parseGitHubOrigin(repoPath: string): string | null {
 export function isMergedToMain(branch: string): boolean {
 	fetchMain();
 	const merge = getStrategy() === "merge";
-	const flag = merge ? "" : "-r ";
 	const needle = merge ? branch : `origin/${branch}`;
-	return (
-		run(
-			`git -C "${baseRepo()}" branch ${flag}--merged ${mainRef()} 2>/dev/null | grep -q "${needle}" && echo yes || echo no`,
-			{ quiet: true },
-		).stdout === "yes"
-	);
+	return gitFile(
+		[
+			"-C",
+			baseRepo(),
+			"branch",
+			...(merge ? [] : ["-r"]),
+			"--merged",
+			mainRef(),
+		],
+		{ quiet: true },
+	)
+		.stdout.split(/\r?\n/)
+		.some(
+			(line) => line.trim() === needle || line.trim().endsWith(`/${needle}`),
+		);
 }
 
 // ── Amendment helpers ──────────────────────────────────────────────
 
 export function amendmentBranch(path: string): string {
-	return (
-		run(`git -C "${path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""`, {
-			quiet: true,
-		}).stdout || "?"
-	);
+	const result = gitFile(["-C", path, "rev-parse", "--abbrev-ref", "HEAD"], {
+		quiet: true,
+	});
+	return result.exitCode === 0 ? result.stdout : "?";
 }
 
 export function isDirty(path: string): boolean {
-	const diff = run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
+	const diff = gitFile(["-C", path, "diff", "--quiet"], { quiet: true });
+	const cached = gitFile(["-C", path, "diff", "--cached", "--quiet"], {
 		quiet: true,
-	}).stdout;
-	const cached = run(
-		`git -C "${path}" diff --cached --quiet 2>/dev/null || echo dirty`,
+	});
+	const untracked = gitFile(
+		["-C", path, "ls-files", "--others", "--exclude-standard"],
 		{ quiet: true },
-	).stdout;
-	const untracked = run(
-		`git -C "${path}" ls-files --others --exclude-standard 2>/dev/null`,
-		{ quiet: true },
-	).stdout;
-	return diff !== "" || cached !== "" || untracked !== "";
+	);
+	return (
+		diff.exitCode !== 0 || cached.exitCode !== 0 || untracked.stdout !== ""
+	);
 }
 
 export function worktreeExists(path: string): boolean {
@@ -211,9 +243,22 @@ export function listOpenPRMap(
 	// List all open PRs and match client-side. "@" is used as separator
 	// because it cannot appear in Git branch names or PR numbers/booleans.
 	const result = gh(
-		`pr list --state open --json number,headRefName,isDraft --jq '.[] | .headRefName + "@" + (.number|tostring) + "@" + (.isDraft|tostring)'`,
+		[
+			"pr",
+			"list",
+			"--state",
+			"open",
+			"--json",
+			"number,headRefName,isDraft",
+			"--jq",
+			'.[] | .headRefName + "@" + (.number|tostring) + "@" + (.isDraft|tostring)',
+		],
 		remote,
 	);
+	if (result.exitCode !== 0)
+		throw new Error(
+			result.stderr || result.stdout || `Could not list PRs for ${remote}.`,
+		);
 	if (!result.stdout) return map;
 
 	for (const line of result.stdout.split("\n")) {
@@ -242,9 +287,26 @@ export function listOpenPRMap(
 export function listMergedPRMap(remote: string): Map<string, string> {
 	const map = new Map<string, string>();
 	const result = gh(
-		`pr list --state merged --limit 100 --json number,headRefName --jq '.[] | .headRefName + "@" + (.number|tostring)'`,
+		[
+			"pr",
+			"list",
+			"--state",
+			"merged",
+			"--limit",
+			"100",
+			"--json",
+			"number,headRefName",
+			"--jq",
+			'.[] | .headRefName + "@" + (.number|tostring)',
+		],
 		remote,
 	);
+	if (result.exitCode !== 0)
+		throw new Error(
+			result.stderr ||
+				result.stdout ||
+				`Could not list merged PRs for ${remote}.`,
+		);
 	if (!result.stdout) return map;
 
 	for (const line of result.stdout.split("\n")) {
@@ -257,7 +319,7 @@ export function listMergedPRMap(remote: string): Map<string, string> {
 	return map;
 }
 
-export function listAmendments(): {
+export function listAmendments(binding?: Binding): {
 	topic: string;
 	status: string;
 	pr?: string;
@@ -271,34 +333,24 @@ export function listAmendments(): {
 		prNumber?: string;
 		prDraft?: boolean;
 	}[] = [];
-	const { exitCode } = run(`ls "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
-	if (exitCode !== 0) return results;
+	const selected = binding ?? soleBinding();
+	if (!selected) return results;
+	const worktrees = listRegisteredWorktrees(selected);
+	if (worktrees.length === 0) return results;
 
-	const { stdout } = run(`ls -1 "${AMEND_DIR}" 2>/dev/null`, { quiet: true });
-	if (!stdout) return results;
-
-	const remote = readConfig("remote");
+	const remote = selected.github;
 
 	// Collect branch names first, then batch-fetch PRs in one gh call.
-	const topics: string[] = [];
-	const topicBranches: Map<string, string> = new Map();
-
-	for (const topic of stdout.split("\n")) {
-		if (!topic) continue;
-		const path = `${AMEND_DIR}/${topic}`;
-		if (!existsSync(path)) continue;
-
-		const branch = amendmentBranch(path);
-		if (branch && branch !== "?") topicBranches.set(topic, branch);
-		topics.push(topic);
-	}
+	const topicBranches = new Map(
+		worktrees.map((worktree) => [worktree.topic, worktree.branch]),
+	);
 
 	const prMap = remote
 		? listOpenPRMap(remote)
 		: new Map<string, { number: string; isDraft: boolean }>();
 
-	for (const topic of topics) {
-		const path = `${AMEND_DIR}/${topic}`;
+	for (const worktree of worktrees) {
+		const { topic, path } = worktree;
 		const dirty = isDirty(path);
 		const status = dirty ? "dirty" : "clean";
 
@@ -321,8 +373,69 @@ export function listAmendments(): {
 	return results;
 }
 
+export type RegisteredWorktree = {
+	path: string;
+	topic: string;
+	branch: string;
+};
+
+/** Only worktrees registered in this binding repository can be amendments. */
+export function listRegisteredWorktrees(
+	binding: Binding,
+): RegisteredWorktree[] {
+	const result = gitFile(
+		["-C", binding.path, "worktree", "list", "--porcelain"],
+		{ quiet: true },
+	);
+	if (result.exitCode !== 0) return [];
+	const normalize = (value: string): string => {
+		try {
+			return realpathSync(value);
+		} catch {
+			return resolve(value);
+		}
+	};
+	const owned = normalize(bindingAmendmentsPath(binding));
+	const legacyRoot = normalize(resolveLegacyRoot());
+	const records: RegisteredWorktree[] = [];
+	let path = "";
+	for (const line of `${result.stdout}\n`.split(/\r?\n/)) {
+		if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+		if (line === "" && path) {
+			const normalized = normalize(path.replace(/\/$/, ""));
+			const isOwned =
+				normalized.startsWith(`${owned}/`) ||
+				normalized.startsWith(`${legacyRoot}/`);
+			if (isOwned) {
+				const topic = normalized.slice(normalized.lastIndexOf("/") + 1);
+				const branch = amendmentBranch(normalized);
+				if (topic && branch !== "?")
+					records.push({ path: normalized, topic, branch });
+			}
+			path = "";
+		}
+	}
+	return records;
+}
+
+export function registeredAmendmentPath(
+	topic: string,
+	binding: Binding,
+): string | null {
+	return (
+		listRegisteredWorktrees(binding).find(
+			(worktree) =>
+				worktree.topic === topic && worktree.branch === `amend/${topic}`,
+		)?.path ?? null
+	);
+}
+
+function resolveLegacyRoot(): string {
+	return resolve(AMEND_DIR);
+}
+
 export function ensureGh(): void {
-	const r = run("which gh 2>/dev/null", { quiet: true });
+	const r = runFile("gh", ["--version"], { quiet: true });
 	if (r.exitCode !== 0) {
 		throw new Error("gh CLI not found. Install from https://cli.github.com");
 	}
@@ -330,7 +443,16 @@ export function ensureGh(): void {
 
 export function listOpenPRs(remote: string): string[] {
 	const result = gh(
-		`pr list --state open --json number,title,headRefName --jq '.[] | "#\\(.number)  \\(.title)  (\\(.headRefName))"'`,
+		[
+			"pr",
+			"list",
+			"--state",
+			"open",
+			"--json",
+			"number,title,headRefName",
+			"--jq",
+			'.[] | "#\\(.number)  \\(.title)  (\\(.headRefName))"',
+		],
 		remote,
 	);
 	if (!result.stdout) return [];

@@ -39,4 +39,13 @@ chmod +x "$tmp"
 mv -f "$tmp" "$TARGET"
 printf 'folio %s installed at %s\n' "$TAG" "$TARGET"
 
+# The breaking release owns the one-time legacy config bootstrap. Running the
+# harmless config read here ensures an upgrade migrates before the next
+# command, while a fresh install simply creates an empty v2 config.
+if "$TARGET" config --migration-report; then
+  printf 'folio configuration checked (legacy bindings are migrated automatically)\n'
+else
+  printf 'folio: configuration migration will be retried on first command\n' >&2
+fi
+
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "folio: add $BIN_DIR to PATH to use it.";; esac
