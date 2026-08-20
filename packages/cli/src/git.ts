@@ -127,7 +127,7 @@ export function ensureBase(remote?: string): void {
 
 	const repo = remote ?? getRemote();
 
-	if (existsSync(`${BASE_REPO}/.git`)) {
+	if (existsSync(`${baseRepo()}/.git`)) {
 		// Base exists — fetch is caller's responsibility when needed.
 		return;
 	}
@@ -319,7 +319,7 @@ export function listMergedPRMap(remote: string): Map<string, string> {
 	return map;
 }
 
-export function listAmendments(binding?: Binding): {
+export function listAmendments(binding: Binding): {
 	topic: string;
 	status: string;
 	pr?: string;
@@ -333,12 +333,10 @@ export function listAmendments(binding?: Binding): {
 		prNumber?: string;
 		prDraft?: boolean;
 	}[] = [];
-	const selected = binding ?? soleBinding();
-	if (!selected) return results;
-	const worktrees = listRegisteredWorktrees(selected);
+	const worktrees = listRegisteredWorktrees(binding);
 	if (worktrees.length === 0) return results;
 
-	const remote = selected.github;
+	const remote = binding.github;
 
 	// Collect branch names first, then batch-fetch PRs in one gh call.
 	const topicBranches = new Map(

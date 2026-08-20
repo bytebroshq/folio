@@ -135,6 +135,20 @@ describe("multi-binding configuration and lifecycle", () => {
 		return repo;
 	}
 
+	test("requires the binding alias before bind flags", () => {
+		const home = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
+		homes.push(home);
+		const repo = localBlock("alias-first");
+		const result = runCliAtHome(
+			["bind", "--description", "first", "--path", repo, "second"],
+			home,
+		);
+		expect(result.exitCode).toBe(1);
+		expect(error(result)).toContain("Usage: folio bind <binding>");
+		expect(error(result)).not.toContain("Binding 'first'");
+		rmSync(repo, { recursive: true, force: true });
+	});
+
 	test("binds a local block without switching or deleting existing state", () => {
 		const home = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
 		homes.push(home);

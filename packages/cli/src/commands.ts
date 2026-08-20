@@ -73,7 +73,7 @@ import { enrichDescription, readIndexDescription } from "./skill-enrichment";
 // ── bind ───────────────────────────────────────────────────────────
 
 export function cmdBind(args: string[]): void {
-	const alias = args.find((a) => !a.startsWith("--"));
+	const alias = args[0];
 	if (!alias || !/^[a-z0-9][a-z0-9-]*$/.test(alias))
 		throw new Error(
 			"Usage: folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]",
@@ -865,13 +865,13 @@ export function cmdPublish(args: string[]): void {
 	if (!local) ensureGh();
 
 	const branch = amendmentBranch(path);
-	if (branch !== `amend/${slug}`)
-		throw new Error(
-			`Refusing to remove '${identity}': registered worktree branch is '${branch}', expected 'amend/${slug}'.`,
-		);
-	if (!branch || branch === "?") {
+	if (!branch || branch === "?" || branch === "HEAD") {
 		throw new Error(`Draft '${identity}' is not on a branch.`);
 	}
+	if (branch !== `amend/${slug}`)
+		throw new Error(
+			`Cannot publish '${identity}': registered worktree branch is '${branch}', expected 'amend/${slug}'.`,
+		);
 
 	if (local) {
 		ensurePublishCurrency(identity, branch);
