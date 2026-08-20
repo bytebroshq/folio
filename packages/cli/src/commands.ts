@@ -17,20 +17,26 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { hasLintErrors, lint, printLintResult } from "@folio/core";
 import {
-	AMEND_DIR,
 	amendmentPath,
-	BASE_REPO,
+	type Binding,
 	baseRepo,
+	bindingAmendmentsPath,
+	bindingCheckoutPath,
 	type ConfigKey,
+	canonicalPath,
+	clearBindingContext,
 	ensureConfig,
-	getPath,
+	getBindings,
 	getRemote,
 	getStrategy,
 	hasRemote,
+	loadConfig,
+	parseQualifiedTopic,
 	readConfig,
 	resolvePath,
 	STORE_DIR,
-	topicToSlug,
+	saveConfig,
+	setBindingContext,
 	writeConfig,
 } from "./config";
 import {
@@ -41,290 +47,124 @@ import {
 	ensureGh,
 	fetchMain,
 	gh,
+	gitFile,
 	isDirty,
 	isMergedToMain,
 	listAmendments,
 	listMergedPRMap,
 	listOpenPRMap,
+	listRegisteredWorktrees,
 	mainExists,
 	mainRef,
 	parseGitHubOrigin,
+	registeredAmendmentPath,
 	run,
 	runFile,
 	worktreeExists,
 } from "./git";
-import { openBrowser } from "./open";
 import {
 	downloadReleaseAsset,
 	getRelease,
 	SKILL_ASSET,
 	updateCli,
 } from "./release";
-import {
-	enrichDescription,
-	enrichSkillFile,
-	readIndexDescription,
-} from "./skill-enrichment";
-
-// ── Formatting helpers ──────────────────────────────────────────────
-
-function tableRow(
-	marker: string,
-	topic: string,
-	status: string,
-	pr: string,
-): string {
-	return `  ${marker}${topic.padEnd(35)} ${status.padEnd(7)} ${pr}`;
-}
-
-function printStatusFooter(bound: string, path: string): void {
-	console.log("");
-	if (bound === path) {
-		console.log(`Bound to ${bound}`);
-		return;
-	}
-	console.log(`Bound to ${bound} · ${path}`);
-}
+import { enrichDescription, readIndexDescription } from "./skill-enrichment";
 
 // ── bind ───────────────────────────────────────────────────────────
 
-const REPO_SHAPE = /^[\w.-]+\/[\w.-]+$/;
-
-/**
- * Decide how a single bind positional is interpreted: an existing directory
- * (or path-marked target) binds a local repo in place; anything else is
- * treated as a GitHub owner/repo. --remote / --local override this.
- */
-function resolveBindTarget(target: string): "local" | "remote" {
-	if (/^(\/|~\/|~$|\.\/|\.\.\/|\.$|\.\.$)/.test(target)) return "local";
-	return existsSync(resolvePath(target)) ? "local" : "remote";
-}
-
-/** A binding is the (remote, path) pair — either half may be unset. */
-type Binding = { remote: string | null; path: string | null };
-
-function currentBinding(): Binding {
-	return { remote: readConfig("remote"), path: getPath() };
-}
-
-function describeBinding(b: Binding): string {
-	if (b.remote && b.path) return `${b.remote} · ${b.path}`;
-	return b.remote ?? b.path ?? "(none)";
-}
-
-/** Guard against silently discarding an existing binding's amendments. */
-function checkRebind(next: Binding, force: boolean): boolean {
-	const current = currentBinding();
-	if (!current.remote && !current.path) return true;
-	if (current.remote === next.remote && current.path === next.path) {
-		console.log(`Already bound to ${describeBinding(current)}.`);
-		return false;
-	}
-	if (!force) {
+export function cmdBind(args: string[]): void {
+	const alias = args[0];
+	if (!alias || !/^[a-z0-9][a-z0-9-]*$/.test(alias))
 		throw new Error(
-			`Currently bound to ${describeBinding(current)}. All drafts will be lost. Use --force to re-bind.`,
+			"Usage: folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]",
 		);
-	}
-	return true;
-}
-
-/**
- * Detach from the current binding: drop amendment worktrees. Never touches
- * the bound directory itself — a custom path is the user's checkout; only
- * the managed clone is folio-owned.
- */
-function detachCurrent(): void {
-	const old = baseRepo();
-	if (existsSync(AMEND_DIR)) {
-		for (const entry of readdirSync(AMEND_DIR)) {
-			run(`rm -rf "${AMEND_DIR}/${entry}"`);
-		}
-	}
-	if (existsSync(`${old}/.git`)) {
-		run(`git -C "${old}" worktree prune 2>/dev/null || true`, { quiet: true });
-	}
-}
-
-function bindLocal(path: string, force: boolean): void {
-	const abs = resolvePath(path);
-
-	if (!checkRebind({ remote: null, path: abs }, force)) return;
-
-	if (!existsSync(abs)) {
-		throw new Error(`No such directory: ${abs}. Run 'folio create ${path}'?`);
-	}
-	if (!existsSync(`${abs}/.git`)) {
+	const value = (flag: string): string | null => {
+		const index = args.indexOf(flag);
+		return index >= 0 ? (args[index + 1] ?? null) : null;
+	};
+	const github = value("--github");
+	const path = value("--path");
+	const description = value("--description");
+	const strategy = (value("--strategy") ?? (github ? "pr" : "merge")) as
+		| "merge"
+		| "pr";
+	if (strategy !== "merge" && strategy !== "pr")
+		throw new Error("strategy must be 'merge' or 'pr'.");
+	if (strategy === "pr" && !github)
+		throw new Error("strategy pr requires --github <owner/repo>.");
+	if (!github && !path)
+		throw new Error("Provide --github <owner/repo> or --path <local-repo>.");
+	ensureConfig();
+	const config = loadConfig();
+	if (config.bindings[alias])
+		throw new Error(`Binding '${alias}' already exists.`);
+	const abs = resolvePath(path ?? bindingCheckoutPath(alias));
+	const canonicalAbs = canonicalPath(abs);
+	const githubKey = github?.toLowerCase();
+	const duplicateGithub =
+		github &&
+		Object.entries(config.bindings).find(
+			([, binding]) => binding.github?.toLowerCase() === githubKey,
+		);
+	if (duplicateGithub)
 		throw new Error(
-			`${abs} is not a git repository. Run 'git init -b main' there or 'folio create <path>'.`,
+			`GitHub repo '${github}' is already bound as '${duplicateGithub[0]}'.`,
 		);
+	const duplicatePath = Object.entries(config.bindings).find(
+		([, binding]) => canonicalPath(binding.path) === canonicalAbs,
+	);
+	if (duplicatePath)
+		throw new Error(`Path '${abs}' is already bound as '${duplicatePath[0]}'.`);
+	if (github && !existsSync(`${abs}/.git`)) {
+		mkdirSync(dirname(abs), { recursive: true });
+		const clone = gitFile([
+			"clone",
+			"--quiet",
+			`git@github.com:${github}.git`,
+			abs,
+		]);
+		if (clone.exitCode !== 0)
+			throw new Error(`Failed to clone ${github}. Check access and try again.`);
+	}
+	if (!existsSync(`${abs}/.git`))
+		throw new Error(`${abs} is not a git repository.`);
+	if (github) {
+		const origin = parseGitHubOrigin(abs);
+		if (!origin || origin.toLowerCase() !== githubKey)
+			throw new Error(
+				`${abs} is not a checkout of '${github}' (origin: ${origin ?? "not a GitHub repository"}).`,
+			);
 	}
 	const hasMain =
-		run(`git -C "${abs}" rev-parse --verify main 2>/dev/null`, {
-			quiet: true,
-		}).exitCode === 0;
-	if (!hasMain) {
+		gitFile(["-C", abs, "rev-parse", "--verify", "main"], { quiet: true })
+			.exitCode === 0;
+	if (!hasMain)
 		throw new Error(
 			`${abs} has no 'main' branch. Folio uses main as published truth.`,
 		);
-	}
-
-	ensureConfig();
-	detachCurrent();
-	writeConfig("path", abs);
-	writeConfig("strategy", "merge");
-	writeConfig("remote", "");
-	ensureBase();
-
-	console.log(`✓ Bound to ${abs} (local).`);
-	refreshInstalledSkillEnrichment();
-
-	// Promotion nudge: a GitHub origin can review via draft PRs instead.
-	const origin = parseGitHubOrigin(abs);
-	if (origin) {
-		console.log(
-			`  origin is github.com/${origin} — 'folio config strategy pr' to review via draft PRs.`,
-		);
-	}
-}
-
-/** Verify SSH access to a GitHub repo before any state changes. */
-function checkRemoteAccess(remote: string): void {
-	console.log(`Checking access to ${remote}...`);
-	const authCheck = run(`git ls-remote git@github.com:${remote}.git HEAD`, {
-		quiet: true,
-	});
-	if (authCheck.exitCode !== 0) {
-		throw new Error(
-			`Cannot access ${remote}. Check your SSH setup or repo URL. Run: gh auth status`,
-		);
-	}
-}
-
-/** Bind a GitHub remote with its checkout at the managed default path. */
-function bindRemote(remote: string, force: boolean): void {
-	if (!checkRebind({ remote, path: null }, force)) return;
-
-	checkRemoteAccess(remote);
-	ensureConfig();
-
-	// If base exists from a different remote, nuke it (folio-owned clone).
-	if (existsSync(`${BASE_REPO}/.git`)) {
-		const existingUrl = run(
-			`git -C "${BASE_REPO}" remote get-url origin 2>/dev/null || echo ""`,
-			{ quiet: true },
-		).stdout;
-		if (existingUrl !== `git@github.com:${remote}.git`) {
-			console.log("Old clone points to a different remote. Re-cloning...");
-			run(`rm -rf "${BASE_REPO}"`);
-		}
-	}
-
-	detachCurrent();
-	writeConfig("remote", remote);
-	writeConfig("strategy", "pr");
-	writeConfig("path", "");
-	writeConfig("source", "");
-	ensureBase(remote);
-
-	// Fast-forward main checkout
-	run(
-		`git -C "${BASE_REPO}" checkout main --quiet 2>/dev/null || git -C "${BASE_REPO}" checkout origin/main --quiet`,
+	const worktreeConfig = gitFile(
+		["-C", abs, "config", "extensions.worktreeConfig", "true"],
 		{ quiet: true },
 	);
-	const ff = run(
-		`git -C "${BASE_REPO}" pull --ff-only origin main --quiet 2>/dev/null || echo "(main behind remote — run 'folio status --sync' to catch up)"`,
-		{ quiet: true },
-	);
-	if (ff.stdout) console.log(`  ${ff.stdout}`);
-
-	console.log(`✓ Bound to ${remote}.`);
-	refreshInstalledSkillEnrichment();
-}
-
-/** Bind a GitHub remote, cloning the checkout into a user-chosen path. */
-function bindRemoteInto(remote: string, path: string, force: boolean): void {
-	if (!REPO_SHAPE.test(remote) || existsSync(resolvePath(remote))) {
-		throw new Error(
-			`'${remote}' doesn't look like <owner/repo>. Usage: folio bind <owner/repo> <path>`,
-		);
-	}
-
-	const abs = resolvePath(path);
-	if (!checkRebind({ remote, path: abs }, force)) return;
-
-	if (existsSync(abs) && readdirSync(abs).length > 0) {
-		throw new Error(`${abs} already exists and is not empty.`);
-	}
-
-	checkRemoteAccess(remote);
-	ensureConfig();
-
-	console.log(`Cloning ${remote} into ${abs}...`);
-	const clone = run(`git clone --quiet git@github.com:${remote}.git "${abs}"`);
-	if (clone.exitCode !== 0) {
-		throw new Error(`Failed to clone ${remote}. Check access and try again.`);
-	}
-	run(`git -C "${abs}" config extensions.worktreeConfig true`, {
-		quiet: true,
-	});
-
-	detachCurrent();
-	writeConfig("remote", remote);
-	writeConfig("path", abs);
-	writeConfig("strategy", "pr");
-	writeConfig("source", "");
-
-	console.log(`✓ Bound to ${remote} at ${abs}.`);
-	refreshInstalledSkillEnrichment();
-}
-
-export function cmdBind(args: string[]): void {
-	const positionals = args.filter((a) => !a.startsWith("--"));
-	const target = positionals[0];
-	const pathArg = positionals[1];
-	if (!target) {
-		throw new Error(
-			"Usage: folio bind <ns/repo | path> [path] [--remote|--local] [--web] [--force]",
-		);
-	}
-
-	const force = args.includes("--force");
-	const hasWeb = args.includes("--web");
-	const wantRemote = args.includes("--remote");
-	const wantLocal = args.includes("--local");
-	if (wantRemote && wantLocal) {
-		throw new Error("--remote and --local are mutually exclusive.");
-	}
-
-	// Two positionals: clone <owner/repo> into <path>.
-	if (pathArg) {
-		if (wantLocal) {
-			throw new Error(
-				"--local doesn't apply to 'folio bind <owner/repo> <path>'.",
-			);
-		}
-		bindRemoteInto(target, pathArg, force);
-		if (hasWeb) cmdWeb([]);
-		return;
-	}
-
-	const kind = wantRemote
-		? "remote"
-		: wantLocal
-			? "local"
-			: resolveBindTarget(target);
-
-	if (kind === "local") {
-		bindLocal(target, force);
-		return;
-	}
-
-	bindRemote(target, force);
-
-	// --web: open browser to web URL
-	if (hasWeb) {
-		cmdWeb([]);
-	}
+	if (worktreeConfig.exitCode !== 0)
+		throw new Error(`Could not enable Git worktree configuration in ${abs}.`);
+	const inferred =
+		description ??
+		readIndexDescription(abs) ??
+		`Folio knowledge block '${alias}'.`;
+	config.bindings[alias] = {
+		id: `bnd_${createHash("sha256")
+			.update(`${alias}\0${github ?? ""}\0${abs}`)
+			.digest("hex")
+			.slice(0, 8)}`,
+		description: inferred,
+		path: abs,
+		github,
+		strategy,
+	};
+	saveConfig(config);
+	mkdirSync(bindingAmendmentsPath(config.bindings[alias]), { recursive: true });
+	console.log(`✓ Bound '${alias}' to ${github ?? abs}.`);
 }
 
 // ── create ─────────────────────────────────────────────────────────
@@ -341,10 +181,16 @@ leaves under leaves/ with type, title, and description frontmatter.
 `;
 
 export function cmdCreate(args: string[]): void {
-	const target = args.find((a) => !a.startsWith("--"));
-	if (!target) throw new Error("Usage: folio create <path> [--force]");
+	const alias = args.find((a) => !a.startsWith("--"));
+	const pathArg = args.includes("--path")
+		? args[args.indexOf("--path") + 1]
+		: null;
+	if (!alias || !pathArg)
+		throw new Error(
+			"Usage: folio create <binding> --path <path> [--description <text>]",
+		);
 
-	const abs = resolvePath(target);
+	const abs = resolvePath(pathArg as string);
 
 	if (existsSync(abs) && readdirSync(abs).length > 0) {
 		throw new Error(`${abs} already exists and is not empty.`);
@@ -354,9 +200,17 @@ export function cmdCreate(args: string[]): void {
 	writeFileSync(join(abs, "index.md"), INDEX_SCAFFOLD, "utf-8");
 	writeFileSync(join(abs, "leaves", ".gitkeep"), "", "utf-8");
 
-	const init = run(
-		`git -C "${abs}" init -b main --quiet && git -C "${abs}" add -A && git -C "${abs}" commit -m "folio: scaffold knowledge block" --quiet`,
-	);
+	const init = gitFile(["-C", abs, "init", "-b", "main", "--quiet"]);
+	if (init.exitCode === 0) gitFile(["-C", abs, "add", "-A"]);
+	if (init.exitCode === 0)
+		gitFile([
+			"-C",
+			abs,
+			"commit",
+			"-m",
+			"folio: scaffold knowledge block",
+			"--quiet",
+		]);
 	if (init.exitCode !== 0) {
 		throw new Error(`git init failed in ${abs}: ${init.stderr}`);
 	}
@@ -365,7 +219,14 @@ export function cmdCreate(args: string[]): void {
 	console.log("  index.md, leaves/");
 	console.log("  git init, initial commit");
 
-	bindLocal(abs, args.includes("--force"));
+	cmdBind([
+		alias,
+		"--path",
+		abs,
+		...(args.includes("--description")
+			? ["--description", args[args.indexOf("--description") + 1] as string]
+			: []),
+	]);
 }
 
 // ── draft ──────────────────────────────────────────────────────────
@@ -373,22 +234,21 @@ export function cmdCreate(args: string[]): void {
 /** Create a new draft, or resume an existing one. Idempotent. */
 export function cmdDraft(args: string[]): void {
 	ensureConfig();
+	const { topic: identity, rest } = extractTopic(args);
+	if (!identity)
+		throw new Error("Usage: folio draft <binding>:<topic> [--force]");
+	const qualified = parseQualifiedTopic(identity);
+	setBindingContext(qualified.binding);
 	ensureBase();
 	if (hasRemote()) fetchMain();
-
-	let force = false;
-	let topic = "";
-	for (const arg of args) {
-		if (arg === "--force") force = true;
-		else topic = arg;
-	}
-
-	if (!topic) {
-		throw new Error("Usage: folio draft <topic> [--force]");
-	}
-
-	const slug = topicToSlug(topic);
-	const path = amendmentPath(slug);
+	const force = rest.includes("--force");
+	const { slug } = qualified;
+	const registered = registeredAmendmentPath(slug, qualified.binding);
+	const path = registered ?? amendmentPath(slug, qualified.binding);
+	if (!registered && worktreeExists(path))
+		throw new Error(
+			`Refusing to operate on unregistered worktree for '${identity}'.`,
+		);
 
 	if (worktreeExists(path)) {
 		const branch = amendmentBranch(path);
@@ -397,70 +257,87 @@ export function cmdDraft(args: string[]): void {
 		if (merged) {
 			if (force) {
 				console.log(
-					`Draft '${branch}' was already published. Deleting and starting fresh...`,
+					`Draft '${identity}' was already published. Deleting and starting fresh...`,
 				);
-				run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
+				gitFile(["-C", baseRepo(), "branch", "-D", branch], { quiet: true });
 				if (hasRemote()) {
-					run(
-						`git -C "${baseRepo()}" push origin --delete "${branch}" 2>/dev/null || true`,
-					);
+					gitFile(["-C", baseRepo(), "push", "origin", "--delete", branch], {
+						quiet: true,
+					});
 				}
-				run(`rm -rf "${path}"`);
+				const removed = gitFile(
+					["-C", baseRepo(), "worktree", "remove", path, "--force"],
+					{ quiet: true },
+				);
+				if (removed.exitCode !== 0)
+					throw new Error(
+						`Could not remove registered worktree for '${identity}': ${removed.stderr || removed.stdout}`,
+					);
 			} else {
 				throw new Error(
-					`draft '${slug}' was already published. Use 'draft ${topic} --force' to restart.`,
+					`draft '${identity}' was already published. Use 'draft ${identity} --force' to restart.`,
 				);
 			}
 		} else {
 			// Open draft — resume it
-			console.log(`Rebasing ${slug} onto main...`);
-			const rebase = run(
-				`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`,
-				{ quiet: true },
-			);
+			console.log(`Rebasing ${identity} onto main...`);
+			const rebase = gitFile(["-C", path, "rebase", mainRef(), "--quiet"], {
+				quiet: true,
+			});
 			if (rebase.exitCode !== 0) {
 				throw new Error(
-					`Rebase conflict in ${slug}. Resolve in ${path}/ then re-run 'folio proof'.`,
+					`Rebase conflict in ${identity}. Resolve in ${path}/ then re-run 'folio proof ${identity}'.`,
 				);
 			}
 			if (hasRemote()) {
-				run(`git -C "${path}" pull --rebase --quiet 2>/dev/null || true`);
+				gitFile(["-C", path, "pull", "--rebase", "--quiet"], { quiet: true });
 			}
-			console.log(`✓ Resumed draft '${slug}'.`);
+			console.log(`✓ Resumed draft '${identity}'.`);
 			return;
 		}
 	}
 
 	// Create new
 	if (worktreeExists(path)) {
-		throw new Error(`draft '${slug}' already exists. Drop it first.`);
+		throw new Error(`draft '${identity}' already exists. Drop it first.`);
 	}
 
 	// Worktree add from a fetched remote-tracking ref (or the local main
 	// branch with no remote) — never checkout/pull the shared base repo
 	// itself, which other concurrent drafts may be mid-operation on.
 	const branch = `amend/${slug}`;
-	console.log(`Creating draft worktree for '${slug}'...`);
-	const wt = run(
-		`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" ${mainRef()} --quiet 2>/dev/null`,
+	console.log(`Creating draft worktree for '${identity}'...`);
+	const wt = gitFile(
+		[
+			"-C",
+			baseRepo(),
+			"worktree",
+			"add",
+			"-b",
+			branch,
+			path,
+			mainRef(),
+			"--quiet",
+		],
+		{ quiet: true },
 	);
 	if (wt.exitCode !== 0) {
-		throw new Error(`Failed to create worktree for '${slug}'.`);
+		throw new Error(`Failed to create worktree for '${identity}'.`);
 	}
 
-	console.log(`✓ Draft '${slug}' created.`);
+	console.log(`✓ Draft '${identity}' created.`);
 	console.log(`  store: ${path}/`);
 	console.log(`  next:  edit leaves in the store, then`);
-	console.log(`         folio proof ${topic}`);
+	console.log(`         folio proof ${identity}`);
 }
 
 // ── shared draft helpers ─────────────────────────────────────────────
 
 /** Usage examples shown in resolveDraft's "no topic" error, per verb. */
 const VERB_EXAMPLES: Record<string, string> = {
-	proof: "folio proof <topic>",
-	publish: "folio publish <topic>",
-	drop: "folio drop <topic> --force",
+	proof: "folio proof <binding>:<topic>",
+	publish: "folio publish <binding>:<topic>",
+	drop: "folio drop <binding>:<topic> --force",
 };
 
 /**
@@ -498,27 +375,40 @@ function extractTopic(
 
 /**
  * Resolve the draft a verb operates on: explicit topic argument first, then
- * $FOLIO_DRAFT, then a teaching error. This is the multiplayer-safe
- * replacement for the old shared `active` config pointer — both args and
- * env live at the process boundary, so concurrent agents never collide.
+ * $FOLIO_DRAFT, then a teaching error. Qualification selects the repository
+ * and amendment worktree together, so the operation cannot drift across blocks.
  */
 function resolveDraft(
 	verb: string,
 	args: string[],
 	valueFlags: string[] = [],
 	adoptRemote = false,
-): { slug: string; path: string; rest: string[] } {
+): {
+	slug: string;
+	path: string;
+	identity: string;
+	rest: string[];
+	binding: Binding;
+} {
 	const { topic: explicit, rest } = extractTopic(args, valueFlags);
-	const topic = explicit ?? process.env.FOLIO_DRAFT;
-	if (!topic) {
+	const identity = explicit ?? process.env.FOLIO_DRAFT;
+	if (!identity) {
 		const example = VERB_EXAMPLES[verb] ?? `folio ${verb} <topic>`;
 		throw new Error(
 			`No draft specified. Pass a topic ('${example}') or set FOLIO_DRAFT.`,
 		);
 	}
 
-	const slug = topicToSlug(topic);
-	const path = amendmentPath(slug);
+	const qualified = parseQualifiedTopic(identity);
+	setBindingContext(qualified.binding);
+	ensureBase();
+	const { slug, binding } = qualified;
+	const registered = registeredAmendmentPath(slug, binding);
+	const path = registered ?? (adoptRemote ? amendmentPath(slug, binding) : "");
+	if (!path)
+		throw new Error(
+			`Worktree for '${identity}' is not a registered amend/${slug} worktree. Run 'folio draft ${identity}'.`,
+		);
 	if (!worktreeExists(path)) {
 		if (adoptRemote && getStrategy() === "pr" && hasRemote()) {
 			const remote = getRemote();
@@ -526,35 +416,50 @@ function resolveDraft(
 			const pr = findOpenPRResult(remote, branch);
 			if (pr.error) {
 				throw new Error(
-					`Could not look up remote draft '${slug}': ${pr.error}`,
+					`Could not look up remote draft '${identity}': ${pr.error}`,
 				);
 			}
 			if (!pr.number) {
 				throw new Error(
-					`Worktree for '${slug}' not found, and no open PR exists for ${branch}. Run 'folio draft ${topic}'.`,
+					`Worktree for '${identity}' not found, and no open PR exists for ${branch}. Run 'folio draft ${identity}'.`,
 				);
 			}
 
 			const branchExists =
-				run(
-					`git -C "${baseRepo()}" show-ref --verify --quiet "refs/heads/${branch}"`,
+				gitFile(
+					[
+						"-C",
+						baseRepo(),
+						"show-ref",
+						"--verify",
+						"--quiet",
+						`refs/heads/${branch}`,
+					],
 					{ quiet: true },
 				).exitCode === 0;
 			console.log(
-				`Adopting remote-only draft '${slug}' from PR #${pr.number}...`,
+				`Adopting remote-only draft '${identity}' from PR #${pr.number}...`,
 			);
-			const fetch = run(
-				`git -C "${baseRepo()}" fetch origin "${branch}" --quiet 2>&1`,
+			const fetch = gitFile(
+				["-C", baseRepo(), "fetch", "origin", branch, "--quiet"],
 				{ quiet: true },
 			);
 			if (fetch.exitCode !== 0) {
 				throw new Error(
-					`Could not fetch remote draft '${slug}' from ${branch}: ${fetch.stderr || fetch.stdout}`,
+					`Could not fetch remote draft '${identity}' from ${branch}: ${fetch.stderr || fetch.stdout}`,
 				);
 			}
 			if (branchExists) {
-				const reset = run(
-					`git -C "${baseRepo()}" branch -f "${branch}" "origin/${branch}" --quiet 2>&1`,
+				const reset = gitFile(
+					[
+						"-C",
+						baseRepo(),
+						"branch",
+						"-f",
+						branch,
+						`origin/${branch}`,
+						"--quiet",
+					],
 					{ quiet: true },
 				);
 				if (reset.exitCode !== 0) {
@@ -564,39 +469,49 @@ function resolveDraft(
 				}
 			}
 			const worktree = branchExists
-				? run(
-						`git -C "${baseRepo()}" worktree add "${path}" "${branch}" --quiet 2>&1`,
+				? gitFile(
+						["-C", baseRepo(), "worktree", "add", path, branch, "--quiet"],
 						{ quiet: true },
 					)
-				: run(
-						`git -C "${baseRepo()}" worktree add -b "${branch}" "${path}" "origin/${branch}" --quiet 2>&1`,
+				: gitFile(
+						[
+							"-C",
+							baseRepo(),
+							"worktree",
+							"add",
+							"-b",
+							branch,
+							path,
+							`origin/${branch}`,
+							"--quiet",
+						],
 						{ quiet: true },
 					);
 			if (worktree.exitCode !== 0) {
 				throw new Error(
-					`Could not create worktree for remote draft '${slug}': ${worktree.stderr || worktree.stdout}`,
+					`Could not create worktree for remote draft '${identity}': ${worktree.stderr || worktree.stdout}`,
 				);
 			}
-			return { slug, path, rest };
+			return { slug, path, identity, rest, binding };
 		}
 		throw new Error(
-			`Worktree for '${slug}' not found. Run 'folio draft ${topic}'.`,
+			`Worktree for '${identity}' not found. Run 'folio draft ${identity}'.`,
 		);
 	}
-	return { slug, path, rest };
+	return { slug, path, identity, rest, binding };
 }
 
 function draftHasChanges(path: string): boolean {
+	const diff = gitFile(["-C", path, "diff", "--quiet"], { quiet: true });
+	const cached = gitFile(["-C", path, "diff", "--cached", "--quiet"], {
+		quiet: true,
+	});
+	const untracked = gitFile(
+		["-C", path, "ls-files", "--others", "--exclude-standard"],
+		{ quiet: true },
+	);
 	return (
-		run(`git -C "${path}" diff --quiet 2>/dev/null || echo dirty`, {
-			quiet: true,
-		}).stdout !== "" ||
-		run(`git -C "${path}" diff --cached --quiet 2>/dev/null || echo dirty`, {
-			quiet: true,
-		}).stdout !== "" ||
-		run(`git -C "${path}" ls-files --others --exclude-standard 2>/dev/null`, {
-			quiet: true,
-		}).stdout !== ""
+		diff.exitCode !== 0 || cached.exitCode !== 0 || untracked.stdout !== ""
 	);
 }
 
@@ -611,7 +526,18 @@ function findOpenPRResult(
 	branch: string,
 ): { number: string; error: string } {
 	const prNum = gh(
-		`pr list --head "${branch}" --state open --json number --jq '.[0].number'`,
+		[
+			"pr",
+			"list",
+			"--head",
+			branch,
+			"--state",
+			"open",
+			"--json",
+			"number",
+			"--jq",
+			".[0].number",
+		],
 		remote,
 	);
 	if (prNum.exitCode !== 0) {
@@ -655,7 +581,7 @@ function acquireMainLock(): void {
 
 			const age = lockAgeMs();
 			if (age === null || age > LOCK_STALE_MS) {
-				run(`rm -rf "${LOCK_PATH}"`, { quiet: true });
+				rmSync(LOCK_PATH, { recursive: true, force: true });
 				continue;
 			}
 			if (Date.now() > deadline) {
@@ -669,7 +595,7 @@ function acquireMainLock(): void {
 }
 
 function releaseMainLock(): void {
-	run(`rm -rf "${LOCK_PATH}"`, { quiet: true });
+	rmSync(LOCK_PATH, { recursive: true, force: true });
 }
 
 function withMainLock<T>(fn: () => T): T {
@@ -703,7 +629,7 @@ export function proofMetadataAction(
 }
 
 function commitDraftChanges(path: string, msg: string): void {
-	run(`git -C "${path}" add -A`);
+	gitFile(["-C", path, "add", "-A"]);
 	const commit = runFile("git", ["-C", path, "commit", "-m", msg, "--quiet"]);
 	if (commit.exitCode !== 0) {
 		throw new Error(`Commit failed: ${commit.stderr || commit.stdout}`);
@@ -712,15 +638,20 @@ function commitDraftChanges(path: string, msg: string): void {
 
 export function cmdProof(args: string[]): void {
 	ensureConfig();
+	const { slug, path, identity, rest } = resolveDraft(
+		"proof",
+		args,
+		["-m"],
+		true,
+	);
 	const local = getStrategy() === "merge";
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { slug, path, rest } = resolveDraft("proof", args, ["-m"], true);
 	const proof = proofMessage(slug, rest);
 	const branch = amendmentBranch(path);
 	if (!branch || branch === "?") {
-		throw new Error(`Draft '${slug}' is not on a branch.`);
+		throw new Error(`Draft '${identity}' is not on a branch.`);
 	}
 
 	if (draftHasChanges(path)) {
@@ -731,28 +662,26 @@ export function cmdProof(args: string[]): void {
 	printLintResult(lintResult);
 	if (hasLintErrors(lintResult)) {
 		throw new Error(
-			`Lint found issues in '${slug}'. Fix them, then re-run 'folio proof ${slug}'.`,
+			`Lint found issues in '${identity}'. Fix them, then re-run 'folio proof ${identity}'.`,
 		);
 	}
 
 	console.log(`Rebasing '${branch}' onto main...`);
-	const rebase = run(
-		`git -C "${path}" rebase ${mainRef()} --quiet 2>/dev/null`,
-	);
+	const rebase = gitFile(["-C", path, "rebase", mainRef(), "--quiet"]);
 	if (rebase.exitCode !== 0) {
 		throw new Error(
-			`REBASE CONFLICT in ${slug} — resolve in ${path}/ then re-run 'folio proof ${slug}'.`,
+			`REBASE CONFLICT in ${identity} — resolve in ${path}/ then re-run 'folio proof ${identity}'.`,
 		);
 	}
 
 	if (local) {
-		const diffStat = run(
-			`git -C "${path}" diff ${mainRef()}...HEAD --stat 2>/dev/null`,
+		const diffStat = gitFile(
+			["-C", path, "diff", `${mainRef()}...HEAD`, "--stat"],
 			{ quiet: true },
 		).stdout;
-		console.log(`✓ Proofed '${slug}' — changes vs main:`);
+		console.log(`✓ Proofed '${identity}' — changes vs main:`);
 		console.log(diffStat || "  (no changes)");
-		console.log(`Run 'folio publish ${slug}' when ready.`);
+		console.log(`Run 'folio publish ${identity}' when ready.`);
 		return;
 	}
 
@@ -760,8 +689,15 @@ export function cmdProof(args: string[]): void {
 	// remote ref is absent for its first lease-protected push, then record the
 	// upstream so later pushes use Git's normal tracking-ref lease.
 	const hasRemoteTracking =
-		run(
-			`git -C "${path}" show-ref --verify --quiet "refs/remotes/origin/${branch}"`,
+		gitFile(
+			[
+				"-C",
+				path,
+				"show-ref",
+				"--verify",
+				"--quiet",
+				`refs/remotes/origin/${branch}`,
+			],
 			{ quiet: true },
 		).exitCode === 0;
 	const lease = hasRemoteTracking
@@ -769,18 +705,24 @@ export function cmdProof(args: string[]): void {
 		: `--force-with-lease=refs/heads/${branch}:`;
 
 	// Force-push and create/update the draft PR.
-	const push = run(
-		`git -C "${path}" push --set-upstream ${lease} origin "${branch}" --quiet 2>&1`,
-	);
+	const push = gitFile([
+		"-C",
+		path,
+		"push",
+		"--set-upstream",
+		lease,
+		"origin",
+		branch,
+		"--quiet",
+	]);
 	if (push.exitCode !== 0) {
 		throw new Error("Push failed. Check network and access.");
 	}
 
 	const prNum = findOpenPR(remote, branch);
 	const msg =
-		run(`git -C "${path}" log -1 --format=%B`, {
-			quiet: true,
-		}).stdout || proof.message;
+		gitFile(["-C", path, "log", "-1", "--format=%B"], { quiet: true }).stdout ||
+		proof.message;
 	const prMessage = proof.explicit ? proof.message : msg;
 	const title = prMessage.split("\n")[0] || `amend: ${slug}`;
 
@@ -809,7 +751,7 @@ export function cmdProof(args: string[]): void {
 			throw new Error(`PR creation failed: ${prResult.stderr}`);
 		}
 		const newPrNum = prResult.stdout.match(/(\d+)$/)?.[0] || "?";
-		console.log(`✓ Proofed '${slug}' — draft PR #${newPrNum} opened`);
+		console.log(`✓ Proofed '${identity}' — draft PR #${newPrNum} opened`);
 		console.log(`  https://github.com/${remote}/pull/${newPrNum}`);
 	} else if (metadataAction === "update") {
 		runFile(
@@ -827,45 +769,66 @@ export function cmdProof(args: string[]): void {
 			],
 			{ quiet: true },
 		);
-		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);
+		console.log(`✓ Proofed '${identity}' — draft PR #${prNum} updated`);
 		console.log(`  https://github.com/${remote}/pull/${prNum}`);
 	} else {
-		console.log(`✓ Proofed '${slug}' — draft PR #${prNum} updated`);
+		console.log(`✓ Proofed '${identity}' — draft PR #${prNum} updated`);
 		console.log(`  https://github.com/${remote}/pull/${prNum}`);
 	}
 	console.log(
-		`  Review on GitHub and mark it ready, then run 'folio publish ${slug}'.`,
+		`  Review on GitHub and mark it ready, then run 'folio publish ${identity}'.`,
 	);
 }
 
 // ── publish ────────────────────────────────────────────────────────
 
-function cleanupDraft(slug: string, path: string, branch: string): void {
-	run(
-		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
+function cleanupDraft(
+	identity: string,
+	slug: string,
+	path: string,
+	branch: string,
+	binding: Binding,
+): void {
+	if (
+		registeredAmendmentPath(slug, binding) !== path ||
+		branch !== `amend/${slug}`
+	) {
+		throw new Error(
+			`Refusing to remove unowned worktree for '${identity}'. Expected registered branch amend/${slug}.`,
+		);
+	}
+	const removed = gitFile(
+		["-C", baseRepo(), "worktree", "remove", path, "--force"],
+		{
+			quiet: true,
+		},
 	);
-	run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
-	console.log(`  Draft '${slug}' closed.`);
+	if (removed.exitCode !== 0)
+		throw new Error(
+			`Could not remove registered worktree for '${identity}': ${removed.stderr || removed.stdout}`,
+		);
+	gitFile(["-C", baseRepo(), "branch", "-D", branch], { quiet: true });
+	console.log(`  Draft '${identity}' closed.`);
 }
 
-function ensurePublishCurrency(slug: string, branch: string): void {
+function ensurePublishCurrency(identity: string, branch: string): void {
 	if (getStrategy() === "pr") {
 		fetchMain();
 	}
 
-	const check = run(
-		`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`,
+	const check = gitFile(
+		["-C", baseRepo(), "merge-base", "--is-ancestor", mainRef(), branch],
 		{ quiet: true },
 	);
 	if (check.exitCode !== 0) {
 		throw new Error(
-			`main moved since proof — run 'folio proof ${slug} && folio publish ${slug}'`,
+			`main moved since proof — run 'folio proof ${identity} && folio publish ${identity}'`,
 		);
 	}
 }
 
 function translatePublishFailure(
-	slug: string,
+	identity: string,
 	branch: string,
 	prNum: string | undefined,
 	output: string,
@@ -873,16 +836,16 @@ function translatePublishFailure(
 	const text = output.trim() || "Merge failed.";
 	if (/(still a draft|draft state|draft pull request)/i.test(text)) {
 		if (prNum) {
-			return `PR #${prNum} is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+			return `PR #${prNum} is still a draft — flip ready on GitHub, then re-run 'folio publish ${identity}'`;
 		}
-		return `Draft PR is still a draft — flip ready on GitHub, then re-run 'folio publish ${slug}'`;
+		return `Draft PR is still a draft — flip ready on GitHub, then re-run 'folio publish ${identity}'`;
 	}
 	if (
 		/(merge conflict|conflict|not up to date|out of date|behind|main moved|rebase)/i.test(
 			text,
 		)
 	) {
-		return `Merge blocked by conflicts or a stale branch — run 'folio proof ${slug}' first.`;
+		return `Merge blocked by conflicts or a stale branch — run 'folio proof ${identity}' first.`;
 	}
 	if (
 		/(protected branch|branch protection|required status checks|ruleset)/i.test(
@@ -896,27 +859,31 @@ function translatePublishFailure(
 
 export function cmdPublish(args: string[]): void {
 	ensureConfig();
+	const { slug, path, identity, binding } = resolveDraft("publish", args);
 	const local = getStrategy() === "merge";
 	const remote = local ? "" : getRemote();
 	if (!local) ensureGh();
 
-	const { slug, path } = resolveDraft("publish", args);
 	const branch = amendmentBranch(path);
-	if (!branch || branch === "?") {
-		throw new Error(`Draft '${slug}' is not on a branch.`);
+	if (!branch || branch === "?" || branch === "HEAD") {
+		throw new Error(`Draft '${identity}' is not on a branch.`);
 	}
+	if (branch !== `amend/${slug}`)
+		throw new Error(
+			`Cannot publish '${identity}': registered worktree branch is '${branch}', expected 'amend/${slug}'.`,
+		);
 
 	if (local) {
-		ensurePublishCurrency(slug, branch);
+		ensurePublishCurrency(identity, branch);
 		// Merge-strategy publish mutates the shared base repo's main branch —
 		// serialize with sync under the coarse lock.
 		const merge = withMainLock(() =>
-			run(`git -C "${baseRepo()}" merge "${branch}" --squash --quiet 2>&1`),
+			gitFile(["-C", baseRepo(), "merge", branch, "--squash", "--quiet"]),
 		);
 		if (merge.exitCode !== 0) {
 			throw new Error(
 				translatePublishFailure(
-					slug,
+					identity,
 					branch,
 					undefined,
 					merge.stderr || merge.stdout,
@@ -924,78 +891,103 @@ export function cmdPublish(args: string[]): void {
 			);
 		}
 		const commit = withMainLock(() =>
-			run(`git -C "${baseRepo()}" commit -m "publish: ${slug}" --quiet 2>&1`),
+			gitFile([
+				"-C",
+				baseRepo(),
+				"commit",
+				"-m",
+				`publish: ${identity}`,
+				"--quiet",
+			]),
 		);
 		if (commit.exitCode !== 0) {
 			throw new Error(`Merge commit failed: ${commit.stderr || commit.stdout}`);
 		}
-		console.log(`✓ Published '${slug}' into main.`);
-		cleanupDraft(slug, path, branch);
+		console.log(`✓ Published '${identity}' into main.`);
+		cleanupDraft(identity, slug, path, branch, binding);
 		return;
 	}
 
 	const prNum = findOpenPR(remote, branch);
 	if (!prNum) {
 		throw new Error(
-			`No open PR for '${slug}'. Run 'folio proof ${slug}' first to send it for review.`,
+			`No open PR for '${identity}'. Run 'folio proof ${identity}' first to send it for review.`,
 		);
 	}
 
-	ensurePublishCurrency(slug, branch);
+	ensurePublishCurrency(identity, branch);
 
-	const merge = run(
-		`gh pr merge --repo "${remote}" ${prNum} --squash --delete-branch 2>&1`,
+	const merge = gh(
+		["pr", "merge", prNum, "--squash", "--delete-branch"],
+		remote,
 	);
 	if (merge.exitCode !== 0) {
 		throw new Error(
 			translatePublishFailure(
-				slug,
+				identity,
 				branch,
 				prNum,
 				merge.stderr || merge.stdout,
 			),
 		);
 	}
-	console.log(`✓ Published '${slug}' — PR #${prNum} merged.`);
+	console.log(`✓ Published '${identity}' — PR #${prNum} merged.`);
 
 	// Under pr strategy main follows origin — fast-forward the checkout.
 	// This mutates the shared base repo, same as sync — under the lock.
-	const ff = withMainLock(() =>
-		run(
-			`git -C "${baseRepo()}" checkout main --quiet 2>/dev/null && git -C "${baseRepo()}" pull --ff-only origin main --quiet 2>/dev/null`,
+	const ff = withMainLock(() => {
+		const checkout = gitFile(
+			["-C", baseRepo(), "checkout", "main", "--quiet"],
 			{ quiet: true },
-		),
-	);
+		);
+		return checkout.exitCode === 0
+			? gitFile(
+					["-C", baseRepo(), "pull", "--ff-only", "origin", "main", "--quiet"],
+					{ quiet: true },
+				)
+			: checkout;
+	});
 	if (ff.exitCode !== 0) {
 		console.log(
 			"  (couldn't fast-forward main from origin — run 'folio status --sync')",
 		);
 	}
 
-	cleanupDraft(slug, path, branch);
+	cleanupDraft(identity, slug, path, branch, binding);
 }
 
 // ── drop ───────────────────────────────────────────────────────────
 
 export function cmdDrop(args: string[]): void {
+	ensureConfig();
 	const { topic: explicit, rest } = extractTopic(args);
 	const force = rest.includes("--force");
-	const topic = explicit ?? process.env.FOLIO_DRAFT;
+	const identity = explicit ?? process.env.FOLIO_DRAFT;
 
-	if (!topic) {
+	if (!identity) {
 		throw new Error(
 			`No draft specified. Pass a topic ('${VERB_EXAMPLES.drop}') or set FOLIO_DRAFT.`,
 		);
 	}
 
-	const slug = topicToSlug(topic);
-	const path = amendmentPath(slug);
+	const qualified = parseQualifiedTopic(identity);
+	setBindingContext(qualified.binding);
+	const { slug, binding } = qualified;
+	const path = registeredAmendmentPath(slug, binding);
+	if (!path)
+		throw new Error(
+			`Refusing to remove '${identity}': no registered worktree on branch amend/${slug}.`,
+		);
 
 	if (!worktreeExists(path)) {
-		throw new Error(`Draft '${slug}' not found.`);
+		throw new Error(`Draft '${identity}' not found.`);
 	}
 
 	const branch = amendmentBranch(path);
+	if (branch !== `amend/${slug}`)
+		throw new Error(
+			`Refusing to remove '${identity}': registered worktree branch is '${branch}', expected 'amend/${slug}'.`,
+		);
 	const remoteBound = hasRemote();
 	const remote = remoteBound ? getRemote() : "";
 
@@ -1003,7 +995,18 @@ export function cmdDrop(args: string[]): void {
 	let prNum = "";
 	if (remoteBound && branch && branch !== "?") {
 		const prResult = gh(
-			`pr list --head "${branch}" --state open --json number --jq '.[0].number'`,
+			[
+				"pr",
+				"list",
+				"--head",
+				branch,
+				"--state",
+				"open",
+				"--json",
+				"number",
+				"--jq",
+				".[0].number",
+			],
 			remote,
 		);
 		if (prResult.stdout && prResult.stdout !== "null") {
@@ -1017,20 +1020,20 @@ export function cmdDrop(args: string[]): void {
 	if (prNum) {
 		if (dirty) {
 			console.log(
-				`  draft '${slug}' has an open draft PR (#${prNum}) and uncommitted changes.`,
+				`  draft '${identity}' has an open draft PR (#${prNum}) and uncommitted changes.`,
 			);
 		} else {
-			console.log(`  draft '${slug}' has an open draft PR (#${prNum}).`);
+			console.log(`  draft '${identity}' has an open draft PR (#${prNum}).`);
 		}
 		console.log(
 			"  --force will close the PR, delete the remote branch, and remove local worktree.",
 		);
 	} else if (dirty) {
 		console.log(
-			`  draft '${slug}' has uncommitted changes. --force discards them.`,
+			`  draft '${identity}' has uncommitted changes. --force discards them.`,
 		);
 	} else {
-		console.log(`  draft '${slug}' is clean.`);
+		console.log(`  draft '${identity}' is clean.`);
 	}
 
 	if (!force) {
@@ -1039,220 +1042,169 @@ export function cmdDrop(args: string[]): void {
 
 	// Close PR if open
 	if (prNum) {
-		run(`gh pr close --repo "${remote}" "${prNum}" 2>/dev/null || true`);
+		gh(["pr", "close", prNum], remote);
 		console.log(`  Closed PR #${prNum}.`);
 	}
 
 	// Delete remote branch
 	if (remoteBound && branch && branch !== "?") {
-		run(
-			`git -C "${baseRepo()}" push origin --delete "${branch}" 2>/dev/null || true`,
-		);
+		gitFile(["-C", baseRepo(), "push", "origin", "--delete", branch], {
+			quiet: true,
+		});
 		console.log(`  Deleted remote branch '${branch}'.`);
 	}
 
 	// Remove worktree
-	run(
-		`git -C "${baseRepo()}" worktree remove "${path}" --force 2>/dev/null || rm -rf "${path}"`,
+	const removed = gitFile(
+		["-C", baseRepo(), "worktree", "remove", path, "--force"],
+		{
+			quiet: true,
+		},
 	);
+	if (removed.exitCode !== 0)
+		throw new Error(
+			`Could not remove registered worktree for '${identity}': ${removed.stderr || removed.stdout}`,
+		);
 
 	// Every strategy leaves the amend branch in the bound repository after
 	// removing its worktree. Drop --force deliberately discards unmerged work,
 	// so remove that local branch as well and allow the topic to be drafted
 	// again.
 	if (branch && branch !== "?") {
-		run(`git -C "${baseRepo()}" branch -D "${branch}" 2>/dev/null || true`);
+		gitFile(["-C", baseRepo(), "branch", "-D", branch], { quiet: true });
 	}
-	console.log(`✓ Dropped draft '${slug}'.`);
+	console.log(`✓ Dropped draft '${identity}'.`);
 }
 
 // ── status ─────────────────────────────────────────────────────────
 
-/** `folio status` fetches in pr strategy so update guidance is fresh. */
-
-/**
- * A draft's one-line dashboard state: dirty (uncommitted changes), saved
- * (committed, no open PR yet — or no remote at all), or proofed (an open
- * PR exists, draft or ready). Degrades gracefully with no remote or a
- * failed gh lookup: `pr`/`prDraft` are simply absent, so it reads "saved".
- */
-function draftState(d: {
-	status: string;
-	prNumber?: string;
-	prDraft?: boolean;
-}): string {
-	if (d.status === "dirty") return "dirty";
-	if (d.prNumber) {
-		return d.prDraft
-			? `proofed · PR #${d.prNumber} draft`
-			: `proofed · PR #${d.prNumber} ready`;
-	}
-	return "saved";
-}
-
-function branchIncludesMain(branch: string): boolean {
-	return (
-		run(
-			`git -C "${baseRepo()}" merge-base --is-ancestor ${mainRef()} "${branch}" 2>/dev/null`,
-			{ quiet: true },
-		).exitCode === 0
-	);
-}
-
-/** `folio status` is the fleet dashboard: one line per open draft. */
-export function cmdStatus(args: string[] = []): void {
-	if (args.length > 1 || (args.length === 1 && args[0] !== "--sync")) {
-		throw new Error("Usage: folio status [--sync]");
-	}
-	const sync = args.includes("--sync");
-	ensureConfig();
-
-	const remote = readConfig("remote");
-	const boundPath = getPath();
-	if (!remote && !boundPath) {
-		console.log(
-			"No repo bound. Run 'folio bind <ns/repo | path>' or 'folio create <path>'.",
+/** `folio status` reports one or all bindings, retaining per-binding failures. */
+function statusBinding(
+	alias: string,
+	binding: Binding,
+	sync: boolean,
+): boolean {
+	setBindingContext(binding);
+	console.log(`\n[${alias}] ${binding.path}`);
+	if (!mainExists()) {
+		console.error(
+			`[${alias}] unavailable: checkout is missing or is not a git repository.`,
 		);
-		return;
+		return false;
 	}
-
-	const bound = boundPath ?? (remote as string);
-	const base = baseRepo();
-
+	const remote = binding.github;
+	const base = binding.path;
 	let fetchFailed = false;
-	if (hasRemote()) {
-		const before = run(`git -C "${base}" rev-parse origin/main 2>/dev/null`, {
-			quiet: true,
-		}).stdout;
-		fetchMain();
-		const after = run(`git -C "${base}" rev-parse origin/main 2>/dev/null`, {
-			quiet: true,
-		}).stdout;
-		fetchFailed = before === "" && after === "";
+	if (remote) {
+		const fetch = fetchMain();
+		fetchFailed = fetch.exitCode !== 0;
+		if (fetchFailed)
+			console.error(
+				`[${alias}] fetch failed: ${fetch.stderr || fetch.stdout || "remote unavailable"}`,
+			);
 	}
 	const staleNote = fetchFailed
 		? " (couldn't reach remote — showing cached state)"
 		: "";
-
-	if (sync && hasRemote() && !fetchFailed) {
+	if (sync && remote && !fetchFailed) {
 		const branch = currentBranch();
 		if (branch !== "main") {
-			throw new Error(
-				`Cannot sync while the bound checkout is on '${branch}'. Switch it to main first.`,
+			console.error(
+				`[${alias}] sync failed: checkout is on '${branch}', not main.`,
 			);
+			return false;
 		}
 		const behind = behindCount();
 		if (behind > 0) {
 			const pull = withMainLock(() =>
-				run(`git -C "${base}" pull --ff-only origin main --quiet 2>&1`),
+				gitFile(["-C", base, "pull", "--ff-only", "origin", "main", "--quiet"]),
 			);
 			if (pull.exitCode !== 0) {
-				throw new Error(`Status sync failed: ${pull.stderr || pull.stdout}`);
+				console.error(`[${alias}] sync failed: ${pull.stderr || pull.stdout}`);
+				return false;
 			}
-			console.log(`Synchronized ${behind} commit(s).`);
+			console.log(`  synchronized ${behind} commit(s)`);
 		}
 	}
-
-	// Main's own state: dirty, behind, or up to date.
 	const mainDirty =
-		run(`git -C "${base}" diff --quiet -- '*.md' 2>/dev/null || echo dirty`, {
+		gitFile(["-C", base, "diff", "--quiet", "--", "*.md"], { quiet: true })
+			.exitCode !== 0 ||
+		gitFile(["-C", base, "diff", "--cached", "--quiet", "--", "*.md"], {
 			quiet: true,
-		}).stdout !== "" ||
-		run(
-			`git -C "${base}" diff --cached --quiet -- '*.md' 2>/dev/null || echo dirty`,
-			{ quiet: true },
-		).stdout !== "";
+		}).exitCode !== 0;
+	if (mainDirty) console.log(`  main: unsaved changes`);
+	else if (remote && behindCount() > 0)
+		console.log(`  main: needs sync${staleNote}`);
+	else console.log(`  main: up to date${staleNote}`);
 
-	if (mainDirty) {
-		console.log("Main has unsaved changes");
-	} else {
-		const behind = mainExists() ? behindCount() : 0;
-		if (behind > 0) {
-			console.log(`Needs sync, run \`folio status --sync\`${staleNote}`);
-		} else {
-			console.log(`Up to date${staleNote}`);
-		}
-	}
-
-	// Fleet dashboard — every open draft worktree under stores/amendments/.
-	const drafts = listAmendments();
-	if (getStrategy() === "pr" && remote) {
-		const remoteDrafts = listOpenPRMap(remote);
-		const mergedDrafts = listMergedPRMap(remote);
-		const rows = new Map<
-			string,
-			{ topic: string; state: string; branch: string }
-		>();
-		const cleanMergedTopics: string[] = [];
-
-		for (const draft of drafts) {
-			const branch = `amend/${draft.topic}`;
-			const info = remoteDrafts.get(branch);
-			const mergedNumber = mergedDrafts.get(branch);
-			const proofed =
-				info && draft.status !== "dirty" && branchIncludesMain(branch);
-			const cleanMerged = Boolean(mergedNumber && draft.status !== "dirty");
-			if (cleanMerged) cleanMergedTopics.push(draft.topic);
-			rows.set(branch, {
-				topic: draft.topic,
-				state: info
-					? `${proofed ? "proofed" : "unproofed"} · PR #${info.number} ${
-							info.isDraft ? "(draft)" : "(ready)"
-						}`
-					: mergedNumber
-						? `${draft.status === "dirty" ? "dirty · " : ""}merged · PR #${mergedNumber}`
-						: "unproofed",
-				branch,
-			});
-		}
-
-		for (const [branch, info] of remoteDrafts) {
-			if (rows.has(branch)) continue;
-			const topic = branch.startsWith("amend/")
-				? branch.slice("amend/".length)
-				: branch;
-			rows.set(branch, {
-				topic,
-				state: `unproofed · PR #${info.number} ${
-					info.isDraft ? "(draft)" : "(ready)"
-				}`,
-				branch,
-			});
-		}
-
-		const ordered = [...rows.values()].sort((a, b) =>
-			a.topic.localeCompare(b.topic),
+	let drafts: ReturnType<typeof listAmendments>;
+	let remoteDrafts: Map<string, { number: string; isDraft: boolean }>;
+	let mergedDrafts: Map<string, string>;
+	try {
+		drafts = listAmendments(binding);
+		remoteDrafts = remote
+			? listOpenPRMap(remote)
+			: new Map<string, { number: string; isDraft: boolean }>();
+		mergedDrafts = remote ? listMergedPRMap(remote) : new Map<string, string>();
+	} catch (error) {
+		console.error(
+			`[${alias}] remote status unavailable: ${(error as Error).message}`,
 		);
-		if (ordered.length === 0) {
-			console.log("No drafts");
-		} else {
-			console.log("");
-			console.log("Drafts:");
-			for (const row of ordered) {
-				console.log(`  ${row.topic.padEnd(30)} ${row.state}`);
-			}
-		}
-		if (cleanMergedTopics.length > 0) {
-			console.log("\nMerged drafts can be removed:");
-			for (const topic of cleanMergedTopics.sort()) {
-				console.log(`  folio drop ${topic} --force`);
-			}
-		}
-		printStatusFooter(bound, base);
-		return;
+		return false;
 	}
-
-	if (drafts.length === 0) {
-		console.log("No drafts");
-	} else {
-		console.log("");
-		console.log("Drafts:");
-		for (const d of drafts) {
-			console.log(`  ${d.topic.padEnd(30)} ${draftState(d)}`);
-		}
+	if (drafts.length === 0 && remoteDrafts.size === 0) {
+		console.log("  drafts: none");
+		return !fetchFailed;
 	}
+	const seenBranches = new Set<string>();
+	for (const draft of drafts.sort((a, b) => a.topic.localeCompare(b.topic))) {
+		const branch = `amend/${draft.topic}`;
+		seenBranches.add(branch);
+		const info = remoteDrafts.get(branch);
+		const merged = mergedDrafts.get(branch);
+		const state = info
+			? `${draft.status} · PR #${info.number} ${info.isDraft ? "draft" : "ready"}`
+			: merged
+				? `${draft.status} · merged PR #${merged}`
+				: draft.status;
+		console.log(`  draft ${alias}:${draft.topic} ${state}`);
+	}
+	for (const [branch, info] of remoteDrafts) {
+		if (seenBranches.has(branch)) continue;
+		const topic = branch.startsWith("amend/")
+			? branch.slice("amend/".length)
+			: branch;
+		console.log(
+			`  draft ${alias}:${topic} unproofed · PR #${info.number} ${
+				info.isDraft ? "draft" : "ready"
+			}`,
+		);
+	}
+	return !fetchFailed;
+}
 
-	printStatusFooter(bound, base);
+export function cmdStatus(args: string[] = []): void {
+	const aliases = args.filter((arg) => !arg.startsWith("--"));
+	const unknownFlags = args.filter(
+		(arg) => arg.startsWith("--") && arg !== "--sync",
+	);
+	if (aliases.length > 1 || unknownFlags.length > 0)
+		throw new Error("Usage: folio status [alias] [--sync]");
+	const sync = args.includes("--sync");
+	if (sync && aliases.length === 0)
+		throw new Error("Usage: folio status <binding> --sync");
+	ensureConfig();
+	const config = loadConfig();
+	const selected = Object.entries(config.bindings)
+		.filter(([alias]) => !aliases[0] || alias === aliases[0])
+		.sort(([a], [b]) => a.localeCompare(b));
+	if (aliases[0] && selected.length === 0)
+		throw new Error(`Unknown binding '${aliases[0]}'.`);
+	let failed = false;
+	for (const [alias, binding] of selected)
+		if (!statusBinding(alias, binding, sync)) failed = true;
+	clearBindingContext();
+	if (failed) process.exitCode = 1;
 }
 
 // ── config command ────────────────────────────────────────────────
@@ -1264,21 +1216,7 @@ export function cmdConfig(args: string[]): void {
 	const value = args[1] as string | undefined;
 
 	if (!key) {
-		// Show all config
-		const remote = readConfig("remote") || "(not set)";
-		const path = getPath() || "(not set)";
-		const strategy = getStrategy();
-		const store = readConfig("store") || "(not set)";
-		const web = readConfig("web") || "(not set)";
-		const bound = readConfig("remote") || getPath();
-		console.log(`remote: ${remote}`);
-		console.log(`path: ${path}`);
-		console.log(`strategy: ${strategy}`);
-		console.log(`store: ${store}`);
-		console.log(`web: ${web}`);
-		// Resolved paths (computed, not stored)
-		console.log(`resolved: ${bound ? baseRepo() : "(not bound)"}`);
-		console.log(`drafts: ${AMEND_DIR}`);
+		console.log(readConfig() || "");
 		return;
 	}
 
@@ -1288,149 +1226,261 @@ export function cmdConfig(args: string[]): void {
 		console.log(val || "");
 		return;
 	}
-
-	// Location is a bind-time decision — moving the checkout means re-binding.
-	if (key === "path" || key === "source") {
+	if (key !== "skill" && key !== "amendments")
 		throw new Error(
-			"path is set at bind time — run 'folio bind <owner/repo | path> [path]' to move the checkout.",
+			`'${key}' belongs to a binding. Use folio bind/binding commands or edit config.yml.`,
 		);
-	}
-
-	if (key === "strategy") {
-		if (value !== "merge" && value !== "pr") {
-			throw new Error("strategy must be 'merge' or 'pr'.");
-		}
-		if (value === "pr" && !hasRemote()) {
-			const origin = getPath() ? parseGitHubOrigin(baseRepo()) : null;
-			if (origin) {
-				throw new Error(
-					`strategy pr needs a remote. origin is github.com/${origin} — run 'folio config remote ${origin}', then retry.`,
-				);
-			}
-			throw new Error(
-				"strategy pr needs a remote — run 'folio config remote <owner/repo>' first.",
-			);
-		}
-	}
-
-	// Write key-value
 	writeConfig(key as ConfigKey, value);
+}
+
+// ── bindings lifecycle ────────────────────────────────────────────
+
+export function cmdBindings(): void {
+	ensureConfig();
+	const entries = Object.entries(getBindings()).sort(([a], [b]) =>
+		a.localeCompare(b),
+	);
+	if (entries.length === 0) {
+		console.log(
+			"No bindings. Run 'folio bind <binding> --github <owner/repo>'.",
+		);
+		return;
+	}
+	for (const [alias, binding] of entries) {
+		console.log(
+			`${alias}\t${binding.github ?? "local"}\t${binding.path}\t${binding.strategy}`,
+		);
+		console.log(`  ${binding.description}`);
+	}
+}
+
+export function cmdBindingRename(args: string[]): void {
+	const oldAlias = args.find((arg) => !arg.startsWith("--"));
+	const newAlias = args.filter((arg) => !arg.startsWith("--"))[1];
+	if (!oldAlias || !newAlias || !/^[a-z0-9][a-z0-9-]*$/.test(newAlias))
+		throw new Error("Usage: folio binding rename <binding> <new-binding>");
+	ensureConfig();
+	const config = loadConfig();
+	const binding = config.bindings[oldAlias];
+	if (!binding) throw new Error(`Unknown binding '${oldAlias}'.`);
+	if (config.bindings[newAlias])
+		throw new Error(`Binding '${newAlias}' already exists.`);
+	if (listRegisteredWorktrees(binding).length > 0)
+		throw new Error(
+			`Cannot rename '${oldAlias}' while it has open amendment worktrees.`,
+		);
+	delete config.bindings[oldAlias];
+	config.bindings[newAlias] = binding;
+	saveConfig(config);
+	console.log(`✓ Renamed binding '${oldAlias}' to '${newAlias}'.`);
+}
+
+export function cmdUnbind(args: string[]): void {
+	const alias = args.find((arg) => !arg.startsWith("--"));
+	if (!alias) throw new Error("Usage: folio unbind <binding>");
+	ensureConfig();
+	const config = loadConfig();
+	const binding = config.bindings[alias];
+	if (!binding) throw new Error(`Unknown binding '${alias}'.`);
+	if (listRegisteredWorktrees(binding).length > 0)
+		throw new Error(
+			`Cannot unbind '${alias}' while it has open amendment worktrees.`,
+		);
+	delete config.bindings[alias];
+	saveConfig(config);
+	console.log(`✓ Unbound '${alias}'. Checkout and amendments were preserved.`);
+}
+
+// ── map ────────────────────────────────────────────────────────────
+
+export type MapEntry = {
+	alias: string;
+	description: string;
+	index: string;
+	available: boolean;
+	error?: string;
+};
+
+function mapEntries(alias?: string): MapEntry[] {
+	const config = loadConfig();
+	const selected = Object.entries(config.bindings)
+		.filter(([name]) => !alias || name === alias)
+		.sort(([a], [b]) => a.localeCompare(b));
+	if (alias && selected.length === 0)
+		throw new Error(`Unknown binding '${alias}'.`);
+	return selected.map(([name, binding]) => {
+		const index = join(binding.path, "index.md");
+		let available = false;
+		let readError = "";
+		try {
+			available = statSync(index).isFile();
+			if (available) readFileSync(index, "utf-8");
+		} catch (error) {
+			readError = (error as Error).message;
+			available = false;
+		}
+		return {
+			alias: name,
+			description:
+				binding.description || (readIndexDescription(binding.path) ?? ""),
+			index,
+			available,
+			...(available
+				? {}
+				: { error: readError || "index.md is unavailable or unreadable" }),
+		};
+	});
+}
+
+export function cmdMap(args: string[] = []): void {
+	ensureConfig();
+	const json = args.includes("--json");
+	const aliases = args.filter((arg) => !arg.startsWith("--"));
+	if (aliases.length > 1)
+		throw new Error("Usage: folio map [<binding>] [--json]");
+	const entries = mapEntries(aliases[0]);
+	if (json) {
+		console.log(JSON.stringify(entries, null, 2));
+		return;
+	}
+	console.log("# Folio map\n");
+	if (entries.length === 0) {
+		console.log("No bindings configured.");
+		return;
+	}
+	for (const entry of entries) {
+		console.log(`- \`${entry.alias}\` — ${entry.description}`);
+		console.log(`  index: ${entry.index}`);
+		if (!entry.available) console.log(`  unavailable: ${entry.error}`);
+	}
 }
 
 // ── web ────────────────────────────────────────────────────────────
 
-export function cmdWeb(args: string[]): void {
-	ensureConfig();
-
-	const noOpen = args.includes("--no-open");
-	const printUrl = args.includes("--print-url");
-
-	const remote = readConfig("remote");
-	if (!remote) {
-		if (getPath()) {
-			throw new Error(
-				"Bound to a local repo — folio web needs a GitHub remote. Run 'folio bind <ns/repo>'.",
-			);
-		}
-		throw new Error("No remote configured. Run 'folio bind <ns/repo>' first.");
-	}
-
-	const webUrl = readConfig("web") || "";
-
-	// Determine target URL
-	let target = "";
-	if (webUrl) {
-		target = `${webUrl}/repos/${remote}`;
-	} else {
-		target = `https://github.com/${remote}/pulls`;
-	}
-
-	if (printUrl || noOpen) {
-		console.log(target);
-		return;
-	}
-
-	console.log(`Opening ${target} ...`);
-	openBrowser(target);
-
-	if (!webUrl) {
-		console.log("");
-		console.log("Folio Web URL not configured.");
-		console.log("Set with: folio config web https://folio.example.com");
-		console.log("Or connect during bind: folio bind <ns/repo> --web");
-	}
+export function cmdWeb(_args: string[]): void {
+	throw new Error("folio web is disabled; use 'folio map' for block routing.");
 }
 
-// ── list ───────────────────────────────────────────────────────────
+// ── drafts ─────────────────────────────────────────────────────────
 
-export function cmdList(): void {
+export function cmdDrafts(args: string[] = []): void {
 	ensureConfig();
-	if (mainExists()) ensureBase();
-
-	const amendments = listAmendments();
-
-	console.log(tableRow("", "DRAFT", "STATUS", "PR"));
-	if (amendments.length === 0) {
-		console.log("No drafts. Run 'folio draft <topic>' to start one.");
-		return;
+	const aliases = args.filter((arg) => !arg.startsWith("--"));
+	if (aliases.length > 1 || args.some((arg) => arg.startsWith("--")))
+		throw new Error("Usage: folio drafts [alias]");
+	const config = loadConfig();
+	const selected = Object.entries(config.bindings)
+		.filter(([alias]) => !aliases[0] || alias === aliases[0])
+		.sort(([a], [b]) => a.localeCompare(b));
+	if (aliases[0] && selected.length === 0)
+		throw new Error(`Unknown binding '${aliases[0]}'.`);
+	let failed = false;
+	for (const [alias, binding] of selected) {
+		setBindingContext(binding);
+		console.log(`${alias}:`);
+		if (!mainExists()) {
+			console.error(`  ${alias}: unavailable (${binding.path})`);
+			failed = true;
+			continue;
+		}
+		let amendments: ReturnType<typeof listAmendments>;
+		try {
+			amendments = listAmendments(binding);
+		} catch (error) {
+			console.error(
+				`  ${alias}: remote drafts unavailable: ${(error as Error).message}`,
+			);
+			failed = true;
+			continue;
+		}
+		if (amendments.length === 0) {
+			console.log("  No drafts");
+			continue;
+		}
+		for (const amendment of amendments) {
+			console.log(
+				`  ${amendment.topic.padEnd(30)} ${amendment.status.padEnd(7)} ${amendment.pr || ""}`,
+			);
+		}
 	}
-
-	for (const a of amendments) {
-		console.log(tableRow("", a.topic, a.status, a.pr || ""));
-	}
+	clearBindingContext();
+	if (failed) process.exitCode = 1;
 }
 
 // ── lint ───────────────────────────────────────────────────────────
 
-/**
- * lint's target resolves the same way a draft verb's does — explicit topic
- * argument, then $FOLIO_DRAFT — but falls back to main instead of erroring
- * when neither is set, since "lint what's bound" is a meaningful default
- * (unlike proof/publish, which are meaningless without a draft).
- */
 export function cmdLint(args: string[]): void {
 	ensureConfig();
 
 	const { topic, rest } = extractTopic(args, ["--spec"]);
+	const all = rest.includes("--all");
 	const json = rest.includes("--json");
 	const strict = rest.includes("--strict");
 	const specIdx = rest.indexOf("--spec");
 	const spec = specIdx >= 0 ? rest[specIdx + 1] : "folio";
 	if (specIdx >= 0 && !spec) {
 		throw new Error(
-			"Usage: folio lint [<topic>] [--spec folio] [--json] [--strict]",
+			"Usage: folio lint <binding>|<binding>:<topic>|--all [--spec folio] [--json] [--strict]",
+		);
+	}
+	if ((!topic && !all) || (topic && all)) {
+		throw new Error(
+			"Specify one binding or qualified draft, or use --all: folio lint <binding> | <binding>:<topic> | --all",
 		);
 	}
 
-	const draftTopic = topic ?? process.env.FOLIO_DRAFT;
-	let storeDir: string;
-
-	if (draftTopic) {
-		const slug = topicToSlug(draftTopic);
-		const path = amendmentPath(slug);
-		if (!worktreeExists(path)) {
+	if (topic) {
+		const qualified = topic.includes(":")
+			? parseQualifiedTopic(topic)
+			: { alias: topic, binding: getBindings()[topic] };
+		if (!qualified.binding) throw new Error(`Unknown binding '${topic}'.`);
+		setBindingContext(qualified.binding);
+		const storeDir = topic.includes(":")
+			? registeredAmendmentPath(qualified.slug, qualified.binding)
+			: qualified.binding.path;
+		if (topic.includes(":") && !storeDir)
 			throw new Error(
-				`Worktree for '${slug}' not found. Run 'folio draft ${draftTopic}'.`,
+				`[${qualified.alias}] draft '${topic}' is not a registered amend/${qualified.slug} worktree.`,
 			);
+		if (!existsSync(`${storeDir}/.git`))
+			throw new Error(`[${qualified.alias}] unavailable: store is missing.`);
+		const result = lint(storeDir, { spec });
+		if (json) console.log(JSON.stringify(result, null, 2));
+		else {
+			console.log(
+				`[${qualified.alias}] ${topic.includes(":") ? "draft" : "main"}`,
+			);
+			printLintResult(result);
 		}
-		storeDir = path;
-	} else if (mainExists()) {
-		storeDir = baseRepo();
-	} else {
-		throw new Error("No store found. Run 'folio bind <ns/repo | path>' first.");
+		if (strict && hasLintErrors(result)) process.exitCode = 1;
+		clearBindingContext();
+		return;
 	}
 
-	const result = lint(storeDir, { spec });
-
-	if (json) {
-		console.log(JSON.stringify(result, null, 2));
-	} else {
+	const results: Array<{ alias: string; result?: unknown; error?: string }> =
+		[];
+	let failed = false;
+	for (const [alias, binding] of Object.entries(getBindings()).sort(
+		([a], [b]) => a.localeCompare(b),
+	)) {
+		setBindingContext(binding);
+		if (!existsSync(`${binding.path}/.git`)) {
+			const error = "store is missing or unavailable";
+			console.error(`[${alias}] unavailable: ${error}`);
+			results.push({ alias, error });
+			failed = true;
+			continue;
+		}
+		const result = lint(binding.path, { spec });
+		results.push({ alias, result });
+		if (json) continue;
+		console.log(`[${alias}] main`);
 		printLintResult(result);
+		if (hasLintErrors(result)) failed = true;
 	}
-
-	if (strict && hasLintErrors(result)) {
-		process.exit(1);
-	}
+	clearBindingContext();
+	if (json) console.log(JSON.stringify(results, null, 2));
+	if (strict || failed) process.exitCode = 1;
 }
 
 // ── update ─────────────────────────────────────────────────────────
@@ -1440,6 +1490,8 @@ export async function cmdUpdate(
 	args: string[],
 	currentVersion: string,
 ): Promise<void> {
+	const migrated = ensureConfig();
+	if (migrated) console.log("Migrated legacy Folio config to named bindings.");
 	const result = await updateCli(currentVersion, args);
 	if (!result.updated) {
 		if (result.available === currentVersion)
@@ -1455,7 +1507,12 @@ export async function cmdUpdate(
 
 	console.log(`Updated Folio ${result.current} → ${result.available}.`);
 	const skillPath = readConfig("skill");
-	if (!skillPath) return;
+	if (!skillPath) {
+		console.log(
+			"No installed skill path recorded; run 'folio skill install <path>'.",
+		);
+		return;
+	}
 	const executable = process.argv[1];
 	const refresh = spawnSync(
 		process.execPath,
@@ -1463,7 +1520,9 @@ export async function cmdUpdate(
 		{ encoding: "utf-8" },
 	);
 	if (refresh.status === 0) {
-		console.log(`Skill refreshed at ${skillPath}.`);
+		console.log(
+			`Skill refreshed at ${skillPath}; global block routing is current.`,
+		);
 	} else {
 		console.log(
 			`CLI updated, but skill refresh failed. Run \`folio skill install\`: ${refresh.stderr || refresh.stdout}`,
@@ -1486,11 +1545,19 @@ function skillEnrichmentEnabled(): boolean {
 	return readConfig("skill-enrich") !== "false";
 }
 
-function refreshInstalledSkillEnrichment(): void {
-	if (!skillEnrichmentEnabled()) return;
-	const skillPath = readConfig("skill");
-	if (!skillPath) return;
-	enrichSkillFile(join(resolvePath(skillPath), "SKILL.md"), baseRepo());
+export function formatSkillRouting(entries: MapEntry[]): string | null {
+	if (entries.length === 0) return null;
+	return [
+		"All Folio blocks are active simultaneously. Use `folio map` to route a request, then read only the selected block index.",
+		...entries.map(
+			(entry) =>
+				`${entry.alias}: ${entry.description} (index: ${entry.index}${entry.available ? "" : "; unavailable"})`,
+		),
+	].join("\n");
+}
+
+function skillRoutingDescription(): string | null {
+	return formatSkillRouting(mapEntries());
 }
 
 function digest(content: string): string {
@@ -1568,6 +1635,7 @@ export async function skillInstall(
 ): Promise<void> {
 	ensureConfig();
 	if (enrich !== undefined) writeConfig("skill-enrich", String(enrich));
+	const shouldEnrich = enrich ?? skillEnrichmentEnabled();
 	const recorded = readConfig("skill");
 	const resolvedTarget = target ?? recorded;
 	if (!resolvedTarget) {
@@ -1586,7 +1654,7 @@ export async function skillInstall(
 	);
 	contents["SKILL.md"] = enrichDescription(
 		contents["SKILL.md"] as string,
-		skillEnrichmentEnabled() ? readIndexDescription(baseRepo()) : null,
+		shouldEnrich ? skillRoutingDescription() : null,
 	);
 	const next: SkillManifest = {
 		version: 1,

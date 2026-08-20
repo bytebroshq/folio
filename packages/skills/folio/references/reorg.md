@@ -18,14 +18,14 @@ Use a reorganization to consolidate overlapping leaves, remove superseded contex
 
 ## Reorganization lifecycle
 
-1. Run `folio status --sync`.
+1. Run `folio status <binding> --sync` for the binding being reorganized.
 2. Map the topic: read the relevant `index.md` entries and search all leaves that mention it.
 3. Decide the surviving canonical leaves before editing.
-4. Run `folio draft <topic-reorg>`.
+4. Run `folio draft <binding>:<topic-reorg>`.
 5. In that worktree, merge current material into the canonical leaves and delete superseded leaves.
 6. Update the responsible structural indexes and every inbound wikilink for deleted or renamed leaves.
 7. Search touched leaves for stale names and framing: old repository names, `prototype`, `transition`, `→`, and dual-home language. Remove each hit or reduce it to one retired/superseded note.
-8. Run `folio proof <topic-reorg>`.
+8. Run `folio proof <binding>:<topic-reorg>`.
 9. Follow the normal human-review and publish steps.
 
 ## Rules

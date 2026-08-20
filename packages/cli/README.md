@@ -38,43 +38,37 @@ FOLIO_VERSION=v0.3.4 curl -fsSL https://raw.githubusercontent.com/bytebroshq/fol
 
 If the install directory is not on `PATH`, the installer updates your shell rc when possible and prints the `export PATH=...` command for the current terminal.
 
-A fresh install is not bound to any repo. Bind a GitHub-backed knowledge repo:
+A fresh install has no bindings. Add named blocks:
 
 ```bash
-folio bind <owner/repo>
+folio bind bytebros --github bytebroshq/operations --path ~/notes/operations \
+  --description "Durable ByteBros operating knowledge"
+folio bind personal --path ~/notes/personal \
+  --description "Personal knowledge"
 ```
 
-Example:
+All blocks remain active simultaneously. Use `folio map` for compact routing
+metadata, then read the selected block's authored index.
 
 ```bash
-folio bind bytebroshq/knowledge
+folio map
+folio bindings
 ```
 
-Or clone it somewhere you choose instead of the managed default:
+Or scaffold a new local block (`index.md`, `leaves/`, git init) and bind it:
 
 ```bash
-folio bind bytebroshq/knowledge ~/notes/knowledge
-```
-
-Or bind a local git repo in place — no GitHub, no `gh`:
-
-```bash
-folio bind ~/notes/my-folio
-```
-
-Or scaffold a new folio (`index.md`, `leaves/`, git init) and bind to it:
-
-```bash
-folio create ~/notes/my-folio
+folio create personal --path ~/notes/personal
 ```
 
 ## Mental model
 
-A binding has two independent knobs:
+A binding records an alias, immutable state ID, description, checkout path,
+optional GitHub repository, and explicit strategy. Alias renames preserve the
+state ID and amendment worktrees; unbinding removes only the registry entry.
 
-- **Location** (`path`) — where the checkout lives. By default folio manages
-  a clone at `~/.config/folio/stores/.main`; a custom `path` puts the
-  checkout in a directory you own, and folio never deletes or rewrites it.
+- **Location** (`path`) — where that block's checkout lives. Each binding has
+  its own checkout and amendment namespace.
 - **Strategy** (`strategy`) — what `publish` does. `merge` merges the draft
   into `main` locally; `pr` pushes the draft branch and review happens in a
   draft pull request on GitHub (needs a `remote` and `gh`).
@@ -83,84 +77,71 @@ The combinations:
 
 | Bind                                            | remote | path      | strategy |
 | ----------------------------------------------- | ------ | --------- | -------- |
-| `folio bind owner/repo`                         | set    | (managed) | pr       |
-| `folio bind owner/repo ~/kb`                    | set    | `~/kb`    | pr       |
-| `folio bind ~/kb` (or `folio create ~/kb`)      | unset  | `~/kb`    | merge    |
-| local bind + `folio config strategy pr`         | set    | `~/kb`    | pr       |
+| `folio bind alias --github owner/repo`              | set    | managed | pr    |
+| `folio bind alias --github owner/repo --path ~/kb`  | set    | `~/kb`  | pr    |
+| `folio bind alias --path ~/kb`                      | unset  | `~/kb`  | merge |
 
-`folio config` reports all three keys.
+`folio config` prints the v2 YAML registry.
 
 ```text
 ~/.config/folio/
   config.yml
   stores/
-    .main/                 # managed clone (default location only)
     amendments/
-      my-topic/             # isolated worktree for one draft
+      <binding-id>/         # isolated namespace for one binding
+        my-topic/           # isolated worktree for one draft
 ```
 
-With a custom `path`, `amendments/` holds worktrees of that checkout
-directly — there is no `.main` clone. You normally do not edit main
-directly. You open a draft, edit files in that draft, then proof and
-publish it.
+You normally do not edit main directly. You open a qualified draft, edit files
+in that draft, then proof and publish it.
 
 ## Basic workflow
-
-Bind once:
-
-```bash
-folio bind <owner/repo>
-```
 
 Open a draft:
 
 ```bash
-folio draft my-topic
+folio draft personal:my-topic
 ```
 
 Edit files here:
 
 ```bash
-~/.config/folio/stores/amendments/my-topic/
+~/.config/folio/stores/amendments/<binding-id>/my-topic/
 ```
 
-Every draft verb — `proof`, `publish`, `drop`, `lint` — takes the topic
-explicitly. This is what makes concurrent drafts safe: each process names
-its own draft, so one agent's work can never land in another agent's
-worktree. Resolution order is: explicit argument, then `$FOLIO_DRAFT`,
-then an error. Set `FOLIO_DRAFT` once in a script or hook that wraps the
-whole ritual in a single process; interactive agents should keep passing
-the topic explicitly — env doesn't survive between tool calls, and the
-topic in the command self-documents the transcript.
+Every draft mutation requires the qualified `binding:topic` identity. The binding
+selects the repository and amendment worktree together; the same topic may
+exist independently in multiple bindings. `$FOLIO_DRAFT`, when used, must
+also contain the qualified identity.
 
 Check state:
 
 ```bash
-folio status
-folio status --sync  # fast-forward the bound store when it is behind
+folio status                  # all bindings
+folio status personal         # one binding
+folio status personal --sync  # sync exactly one binding
+folio drafts                  # all binding drafts
+folio lint personal           # lint one main
+folio lint personal:my-topic # lint one qualified draft
+folio lint --all              # explicitly lint every binding main
 folio update     # check/apply the latest stable Folio CLI release
 ```
 
-`status` is the fleet dashboard · one line per open draft, plus main's
-own state:
+`status` identifies each alias and continues through unavailable blocks:
 
 ```text
-Up to date
+[personal] /path/to/personal
+  main: up to date
+  draft personal:my-draft dirty
 
-Drafts:
-  my-draft                       dirty
-  another-draft                  proofed · PR #42 ready
-
-Bound to owner/repo · ~/.config/folio/stores/.main
+[operations] /path/to/operations
+  unavailable: checkout is missing
 ```
 
-When the bound source has moved:
+Sync exactly one binding:
 
 ```text
-Needs sync, run `folio status --sync`
-No drafts
-
-Bound to owner/repo · ~/.config/folio/stores/.main
+folio status personal --sync
 ```
 
 An in-place binding collapses repeated paths:
@@ -177,7 +158,7 @@ and opens or updates the draft PR; under merge strategy it shows the diff
 vs main. Chain them with `&&`, naming the topic once:
 
 ```bash
-folio proof my-topic
+folio proof personal:my-topic
 ```
 
 Use `-m <message>` when the change needs an intentional, polished public summary. The message becomes the commit message; with PR strategy, its first line becomes the PR title and the full message becomes the PR body. On a subsequent proof, supplying `-m` intentionally replaces the existing PR title and body. Omit `-m` for routine follow-up proofs: Folio uses `amend: <topic>` for the commit and preserves existing PR metadata. When invoking Folio through a shell, pass messages containing Markdown code spans or shell substitutions as one shell-safe argument. Do not use double quotes for those messages: the invoking shell may evaluate backticks or `$()` before Folio starts.
@@ -198,64 +179,67 @@ Publish — merges into main (pr strategy: only once the PR is marked ready;
 merge strategy: squash-merges locally):
 
 ```bash
-folio publish my-topic
+folio publish personal:my-topic
 ```
 
 List drafts:
 
 ```bash
-folio list
+folio drafts
+folio drafts personal
 ```
 
 Drop a draft:
 
 ```bash
-folio drop my-topic --force
+folio drop personal:my-topic --force
 ```
 
 ## Commands
 
+`<binding>` is a short, unique name for a configured Folio block (for example, `bytebros`).
+
 ```text
-folio bind <owner/repo> [--web]      bind to a GitHub-backed knowledge repo (managed clone)
-folio bind <owner/repo> <path>       bind to a GitHub-backed knowledge repo, cloned into <path>
-folio bind <path>                    bind in place to a local git repo
-folio bind ... --remote|--local      force how an ambiguous target is read
-folio create <path>                  scaffold a new folio and bind to it
-folio draft <topic>                  start or resume a draft (--force to restart)
-folio proof <topic>                  commit dirty work, lint, rebase; push + draft PR (pr) or show diff (merge)
-folio publish <topic>                merge the draft into main (squash for merge strategy)
-folio status [--sync]                fleet dashboard; --sync fast-forwards the bound store
+folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>]
+                                      add a named GitHub block binding
+folio bind <binding> --path <path> [--description <text>]
+                                      add a named local block binding
+folio create <binding> --path <path> [--description <text>]
+                                      scaffold a new folio and bind to it
+folio bindings                       list configured bindings
+folio binding rename <binding> <new-binding>
+                                      rename a binding without moving state
+folio unbind <binding>                  remove a binding, preserving files
+folio map [<binding>] [--json]           show the LLM-oriented routing map
+folio draft <binding>:<topic>            start or resume a draft (--force to restart)
+folio proof <binding>:<topic>            commit, lint, rebase, and proof a draft
+folio publish <binding>:<topic>          merge the draft into main
+folio status [<binding>] [--sync]        status all or one; sync requires a binding
 folio update [--version X.Y.Z] [--yes] check or install a stable CLI release
-folio list                           list drafts
-folio drop <topic> --force           delete a draft (and its remote branch, when a remote is bound)
-folio web                            open the web review surface (needs a remote)
+folio drafts [<binding>]                list drafts for all or one binding
+folio drop <binding>:<topic> --force    delete a draft and its remote branch
+folio web                            disabled; use `folio map`
 folio config                         show config
-folio config <key> <value>           set config
-folio lint [<topic>]                 check folio integrity (a draft, or main if omitted)
+folio config skill <path>            set the global installed-skill path
+folio config amendments <path>       set the global amendments root
+folio lint <binding>                   check one binding main
+folio lint <binding>:<topic>            check one qualified draft
+folio lint --all                       check every binding main
 folio skill install <path>           download the matching Folio skill into <path>, remembering it
-folio skill install --no-enrich      install without the bound block description
+folio skill install --no-enrich      install without global routing enrichment
 folio skill install                  re-run against the remembered path
 ```
 
+Lint always requires an explicit scope. With `--json`, a binding or qualified
+draft returns the lint result directly. `--all --json` returns an array of
+binding-qualified results so unavailable blocks and their errors remain
+attributable.
+
 ## Web
 
-Folio Web reviews GitHub-backed folios; it needs a `remote` configured.
-
-The CLI can open Folio Web for the bound repo:
-
-```bash
-folio web
-```
-
-Set the Web URL:
-
-```bash
-folio config web https://folio-web.bytebros.workers.dev
-```
-
-`folio bind --web <owner/repo>` binds locally, then opens the repo in Folio Web.
-
-The CLI does not manage GitHub App installation or web auth. It opens the repo URL; the Web app handles login, setup, and review.
+`folio web` is disabled in this breaking release because the web surface is
+not maintained. Use `folio map` for agent routing and inspect GitHub directly
+when review is needed.
 
 ## Config
 
@@ -265,43 +249,38 @@ Show config:
 folio config
 ```
 
-Fresh config starts clean:
+Fresh config starts as a v2 registry:
 
 ```yaml
-remote:
-store: git
+version: 2
+skill:
+  path: null
+amendments:
+  path: ~/.config/folio/stores/amendments
+bindings: {}
 ```
 
-Binding sets the three binding keys — `remote` (owner/repo, when
-GitHub-backed), `path` (checkout location, blank for the managed clone), and
-`strategy` (`merge` or `pr`). `config` also shows the resolved checkout and
-`amendments` locations.
+The v2 registry stores global skill and amendments settings plus named
+bindings. Each binding stores `id`, `description`, `path`, optional `github`,
+and `strategy`. Manual edits are supported, but invalid configuration fails
+before repository actions.
 
-Set values:
+`skill.path` is global and `amendments.path` is the configurable global root.
+The CLI manages binding IDs and config version; aliases, descriptions, paths,
+GitHub values, and strategies are human-editable.
+
+`folio config skill <path>` and `folio config amendments <path>` update the
+two global paths. Binding fields are intentionally not scalar `folio config`
+keys: use the binding lifecycle commands or edit the validated YAML registry.
+
+Rename or remove a binding:
 
 ```bash
-folio config web https://folio-web.bytebros.workers.dev
+folio binding rename personal notes
+folio unbind notes
 ```
 
-`strategy` can be switched between `merge` and `pr`; `pr` requires a
-`remote` (set one with `folio config remote <owner/repo>` if the checkout's
-git origin points at GitHub). `path` cannot be set here — location is a
-bind-time decision, so changing it means `folio bind`.
-
-`skill` holds the path where `folio skill install` last wrote the skill
-(see [Skill](#skill)). `skill-enrich` records whether its bound block
-description enrichment is enabled. Both are set by `skill install`, not meant
-to be hand-edited here.
-
-Rebind to a different repo, GitHub or local:
-
-```bash
-folio bind <owner/repo> --force
-folio bind <path> --force
-```
-
-Rebinding drops the drafts for the previous binding. The managed clone
-may be re-cloned; a custom `path` directory is yours and is never deleted.
+Neither operation deletes the checkout or amendment worktrees.
 
 ## Skill
 
@@ -318,9 +297,9 @@ folio skill install                          # later — reuses it
 The archive contains the authored skill unchanged, including `version.js`.
 Run `./version.js --is-cli-match` from the installed skill directory to
 verify that it and `folio` are the same release. By default, installation
-locally enriches the skill description with the bound block's `index.md`
-description, wrapped in `<contains>...</contains>`. Pass `--no-enrich` to
-remove and disable that enrichment; pass `--enrich` to re-enable it.
+locally enriches the skill description with a global routing map containing
+all aliases, descriptions, and absolute index paths, wrapped in
+`<contains>...</contains>`. Pass `--no-enrich` to omit that enrichment.
 Package-manager installs that omit `version.js` remain usable without a
 version lock.
 

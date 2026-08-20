@@ -4,25 +4,30 @@
  *
  * User-scoped. Global config in ~/.config/folio/config.yml.
  * Amendments are git worktrees; multiple drafts run concurrently. Every
- * draft verb takes its topic explicitly (arg, or $FOLIO_DRAFT) — no shared
- * "active" pointer, so concurrent agents never collide.
+ * draft verbs take a qualified alias:topic identity (or $FOLIO_DRAFT) — no
+ * shared "active" pointer, so concurrent agents never collide.
  */
 import pkg from "../package.json";
 import {
 	cmdBind,
+	cmdBindingRename,
+	cmdBindings,
 	cmdConfig,
 	cmdCreate,
 	cmdDraft,
+	cmdDrafts,
 	cmdDrop,
 	cmdLint,
-	cmdList,
+	cmdMap,
 	cmdProof,
 	cmdPublish,
 	cmdSkill,
 	cmdStatus,
+	cmdUnbind,
 	cmdUpdate,
 	cmdWeb,
 } from "./commands";
+import { ensureConfig, formatMigrationReport } from "./config";
 
 function die(msg: string): never {
 	console.error(`folio: ${msg}`);
@@ -34,50 +39,62 @@ folio — knowledge management CLI
 
 Usage:
   folio --version | -v             Print the CLI version
-  folio bind <ns/repo> [--web]    Bind to a knowledge repo (one-time setup)
-  folio bind <ns/repo> <path>      Bind to a knowledge repo, cloned into <path>
-  folio bind <path>                Bind to a local git repo, in place
-  folio create <path>              Scaffold a new folio and bind to it
-  folio draft <topic>              Start or resume a draft (--force to restart)
-  folio proof <topic>              Commit dirty work, lint, rebase; push + open draft PR (pr) or show diff (local)
-  folio publish <topic>            Merge the draft into main
-  folio status [--sync]            Fleet dashboard; --sync fast-forwards the bound store
+  folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>]
+                                                    Add a GitHub block binding
+  folio bind <binding> --path <path> [--description <text>]
+                                                    Add a local block binding
+  folio create <binding> --path <path> [--description <text>]
+                                                    Scaffold and bind a block
+  folio bindings                       List configured block bindings
+  folio binding rename <binding> <new-binding> Rename a binding without moving state
+  folio unbind <binding>                  Remove a binding, preserving files
+  folio map [<binding>] [--json]     Show the LLM-oriented block routing map
+  folio draft <binding>:<topic>      Start or resume a draft (--force to restart)
+  folio proof <binding>:<topic>      Commit dirty work, lint, rebase, and proof a draft
+  folio publish <binding>:<topic>    Merge the qualified draft into main
+  folio status [<binding>] [--sync] Fleet dashboard; --sync requires one binding
   folio update [--version X.Y.Z] [--yes]  Check or install a stable CLI release
-  folio drop <topic> --force       Delete a draft (local + remote)
-  folio list                       List all drafts
+  folio drop <binding>:<topic> --force Delete a draft (local + remote)
+  folio drafts [<binding>]           List drafts for all blocks or one block
   folio config                     Show global config
-  folio config <key> <value>       Set config value
-  folio web                        Open Folio Web or GitHub PR list for bound repo
-  folio web --no-open              Print URL only
-  folio lint [<topic>]             Check folio integrity (a draft, or main if omitted)
-  folio lint --spec folio          Check with an explicit lint spec
-  folio lint --json                Machine-readable output
-  folio lint --strict              Exit 1 if any errors
-  folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits bound block context)
+  folio config skill <path>        Set the global installed-skill path
+  folio config amendments <path>   Set the global amendments root
+  folio web                        Disabled; use folio map for block routing
+  folio lint <binding>             Check one binding main
+  folio lint <binding>:<topic>     Check one qualified draft
+  folio lint --all                 Check every binding main
+                                    Add --spec, --json, or --strict as needed
+  folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits global routing)
 
-Edits go in the draft worktree at ~/.config/folio/stores/amendments/<topic>/.
-Flow: draft <topic> → edit → proof <topic> → publish <topic>.
+Edits go in the binding-specific amendment worktree under the configured amendments root.
+A binding is a short, unique name for a configured Folio block (for example, bytebros).
+Flow: draft <binding>:<topic> → edit → proof <binding>:<topic> → publish <binding>:<topic>.
 
-Every draft verb resolves its topic as: explicit argument, then
-$FOLIO_DRAFT, then an error. Set FOLIO_DRAFT once in a script or hook that
+Every draft verb requires a qualified binding:topic identity, supplied explicitly
+or through $FOLIO_DRAFT. Set FOLIO_DRAFT once in a script or hook that
 wraps the whole ritual in a single process; interactive agents should keep
-passing the topic explicitly. Chain steps with && (e.g. folio draft my-topic
-&& ... && folio proof my-topic) — verbs stay single-purpose.
+  passing the qualified identity explicitly. Chain steps with && (e.g. folio
+draft personal:my-topic && ... && folio proof personal:my-topic) — verbs stay
+single-purpose.
 `;
 
 const COMMAND_HELP: Record<string, string> = {
-	bind: `Usage: folio bind <owner/repo> [path] [--remote|--local] [--web] [--force]\n\nBind a remote Folio repository or an existing local repository.`,
-	create: `Usage: folio create <path> [--force]\n\nCreate a new local Folio repository and bind to it.`,
-	draft: `Usage: folio draft <topic> [--force]\n\nStart or resume a draft. --force restarts a draft already published.`,
-	proof: `Usage: folio proof <topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and update the draft PR or local diff.\n\nWithout -m, routine follow-up proofs preserve an existing PR title and body.\nUse -m for an intentional, polished message; it updates the commit and PR metadata.\nWhen invoking through a shell, pass messages with Markdown code spans or shell substitutions as one shell-safe argument.`,
-	publish: `Usage: folio publish <topic>\n\nMerge a ready draft PR, or publish a local-strategy draft.`,
-	drop: `Usage: folio drop <topic> [--force]\n\nDiscard a draft. --force confirms deletion when local edits or a PR exist.`,
-	list: `Usage: folio list\n\nList drafts in the bound Folio.`,
-	status: `Usage: folio status [--sync]\n\nShow the bound Folio and every draft. --sync fast-forwards the bound store.`,
+	bind: `Usage: folio bind <binding> --github <owner/repo> [--path <path>] [--description <text>] [--strategy merge|pr]\n\nAdd a named Folio block binding. A binding is a short, unique name such as bytebros.`,
+	bindings: `Usage: folio bindings\n\nList configured block bindings.`,
+	binding: `Usage: folio binding rename <binding> <new-binding>\n\nRename a binding without moving its checkout or amendments.`,
+	map: `Usage: folio map [<binding>] [--json]\n\nShow the LLM-oriented routing map for all blocks or one block.`,
+	create: `Usage: folio create <binding> --path <path> [--description <text>]\n\nCreate a new local Folio repository and bind to it.`,
+	draft: `Usage: folio draft <binding>:<topic> [--force]\n\nStart or resume a qualified draft.`,
+	proof: `Usage: folio proof <binding>:<topic> [-m <message>]\n\nCommit dirty work, lint, rebase, and proof a qualified draft.`,
+	publish: `Usage: folio publish <binding>:<topic>\n\nMerge a ready qualified draft.`,
+	drop: `Usage: folio drop <binding>:<topic> [--force]\n\nDiscard a qualified draft.`,
+	drafts: `Usage: folio drafts [<binding>]\n\nList drafts for all blocks or one block.`,
+	status: `Usage: folio status [<binding>] [--sync]\n\nShow all bindings or one binding. --sync requires exactly one binding.`,
 	update: `Usage: folio update [--version <X.Y.Z>] [--yes]\n\nCheck for or install a stable CLI release. --yes permits a non-interactive update.`,
-	config: `Usage: folio config [<key> [<value>]]\n\nShow all configuration, read one key, or set one key.`,
-	web: `Usage: folio web [--no-open|--print-url]\n\nOpen the Folio Web or GitHub PR page for the bound repository.`,
-	lint: `Usage: folio lint [<topic>] [--spec <name>] [--json] [--strict]\n\nCheck Folio integrity for a draft or the bound main store.`,
+	config: `Usage: folio config [skill|amendments [<value>]]\n\nShow the registry, read a global setting, or set the global skill path or amendments root. Binding fields are managed by bind/binding commands or explicit YAML edits.`,
+	unbind: `Usage: folio unbind <binding>\n\nRemove a binding while preserving its checkout and amendments.`,
+	web: `Usage: folio web\n\nDisabled; use folio map for block routing.`,
+	lint: `Usage: folio lint <binding>|<binding>:<topic>|--all [--spec <name>] [--json] [--strict]\n\nCheck one binding main, one qualified draft, or explicitly check every binding with --all. Targeted --json returns a direct lint result; --all --json returns binding-qualified results.`,
 	skill: `Usage: folio skill install [path] [--enrich|--no-enrich]\n\nManage the installed Folio agent skill.`,
 	"skill install": `Usage: folio skill install [path] [--enrich|--no-enrich]\n\nDownload the matching Folio skill and synchronize it to the given or remembered path.`,
 };
@@ -137,9 +154,20 @@ if (cmd && COMMAND_HELP[cmd] && hasHelpFlag(cmd, args)) {
 }
 
 try {
+	if (cmd && cmd !== "-h" && cmd !== "--help" && !COMMAND_HELP[cmd])
+		die(`unknown command '${cmd}'. Run 'folio --help' for usage.`);
+	const migration = ensureConfig();
+	if (migration) console.log(formatMigrationReport(migration));
 	switch (cmd) {
 		case "bind":
 			cmdBind(args);
+			break;
+		case "bindings":
+			cmdBindings();
+			break;
+		case "binding":
+			if (args[0] === "rename") cmdBindingRename(args.slice(1));
+			else throw new Error("Usage: folio binding rename <old> <new>");
 			break;
 		case "create":
 			cmdCreate(args);
@@ -156,11 +184,17 @@ try {
 		case "drop":
 			cmdDrop(args);
 			break;
-		case "list":
-			cmdList();
+		case "drafts":
+			cmdDrafts(args);
+			break;
+		case "map":
+			cmdMap(args);
 			break;
 		case "status":
 			cmdStatus(args);
+			break;
+		case "unbind":
+			cmdUnbind(args);
 			break;
 		case "update":
 			await cmdUpdate(args, pkg.version);

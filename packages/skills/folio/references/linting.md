@@ -19,13 +19,15 @@ Deep nesting and Markdown outside `leaves/` may be warnings, not format failures
 
 ## Prefer `proof` over `lint`
 
-Use `folio proof <topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` for read-only checks.
+Use `folio proof <binding>:<topic>` for a draft; it commits, lints, rebases, and prepares review. Use `folio lint` with an explicit scope for read-only checks.
 
 ```sh
-folio lint --strict        # check the bound base store; fail on errors
-folio lint <topic>         # check a draft without preparing it
-folio lint --json          # machine-readable output
-folio lint --spec folio    # select the Folio profile
+folio lint <binding>         # check one binding main
+folio lint <binding>:<topic> # check one qualified draft
+folio lint --all            # explicitly check every binding main
+folio lint <binding> --json # direct machine-readable lint result
+folio lint --all --json     # binding-qualified aggregate results
+folio lint <binding> --spec folio # select the Folio profile
 ```
 
 ## Without the CLI
