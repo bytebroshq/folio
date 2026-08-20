@@ -57,12 +57,13 @@ Usage:
   folio drop <binding>:<topic> --force Delete a draft (local + remote)
   folio drafts [<binding>]           List drafts for all blocks or one block
   folio config                     Show global config
-  folio config <key> <value>       Set config value
+  folio config skill <path>        Set the global installed-skill path
+  folio config amendments <path>   Set the global amendments root
   folio web                        Disabled; use folio map for block routing
-  folio lint [<topic>]             Check folio integrity (a draft, or main if omitted)
-  folio lint --spec folio          Check with an explicit lint spec
-  folio lint --json                Machine-readable output
-  folio lint --strict              Exit 1 if any errors
+  folio lint <binding>             Check one binding main
+  folio lint <binding>:<topic>     Check one qualified draft
+  folio lint --all                 Check every binding main
+                                    Add --spec, --json, or --strict as needed
   folio skill install [path]       Download the matching Folio skill into [path] (remembers it; --no-enrich omits global routing)
 
 Edits go in the binding-specific amendment worktree under the configured amendments root.
@@ -90,10 +91,10 @@ const COMMAND_HELP: Record<string, string> = {
 	drafts: `Usage: folio drafts [<binding>]\n\nList drafts for all blocks or one block.`,
 	status: `Usage: folio status [<binding>] [--sync]\n\nShow all bindings or one binding. --sync requires exactly one binding.`,
 	update: `Usage: folio update [--version <X.Y.Z>] [--yes]\n\nCheck for or install a stable CLI release. --yes permits a non-interactive update.`,
-	config: `Usage: folio config [<key> [<value>]]\n\nShow all configuration, read one key, or set one key.`,
+	config: `Usage: folio config [skill|amendments [<value>]]\n\nShow the registry, read a global setting, or set the global skill path or amendments root. Binding fields are managed by bind/binding commands or explicit YAML edits.`,
 	unbind: `Usage: folio unbind <binding>\n\nRemove a binding while preserving its checkout and amendments.`,
 	web: `Usage: folio web\n\nDisabled; use folio map for block routing.`,
-	lint: `Usage: folio lint [<topic>] [--spec <name>] [--json] [--strict]\n\nCheck Folio integrity for a draft or the bound main store.`,
+	lint: `Usage: folio lint <binding>|<binding>:<topic>|--all [--spec <name>] [--json] [--strict]\n\nCheck one binding main, one qualified draft, or explicitly check every binding with --all. Targeted --json returns a direct lint result; --all --json returns binding-qualified results.`,
 	skill: `Usage: folio skill install [path] [--enrich|--no-enrich]\n\nManage the installed Folio agent skill.`,
 	"skill install": `Usage: folio skill install [path] [--enrich|--no-enrich]\n\nDownload the matching Folio skill and synchronize it to the given or remembered path.`,
 };
@@ -153,6 +154,8 @@ if (cmd && COMMAND_HELP[cmd] && hasHelpFlag(cmd, args)) {
 }
 
 try {
+	if (cmd && cmd !== "-h" && cmd !== "--help" && !COMMAND_HELP[cmd])
+		die(`unknown command '${cmd}'. Run 'folio --help' for usage.`);
 	const migration = ensureConfig();
 	if (migration) console.log(formatMigrationReport(migration));
 	switch (cmd) {

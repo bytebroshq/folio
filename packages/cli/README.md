@@ -121,9 +121,9 @@ folio status                  # all bindings
 folio status personal         # one binding
 folio status personal --sync  # sync exactly one binding
 folio drafts                  # all binding drafts
-folio lint                    # lint every binding main
 folio lint personal           # lint one main
 folio lint personal:my-topic # lint one qualified draft
+folio lint --all              # explicitly lint every binding main
 folio update     # check/apply the latest stable Folio CLI release
 ```
 
@@ -220,14 +220,20 @@ folio drafts [<binding>]                list drafts for all or one binding
 folio drop <binding>:<topic> --force    delete a draft and its remote branch
 folio web                            disabled; use `folio map`
 folio config                         show config
-folio config <key> <value>           set config
-folio lint                            check every binding main
+folio config skill <path>            set the global installed-skill path
+folio config amendments <path>       set the global amendments root
 folio lint <binding>                   check one binding main
 folio lint <binding>:<topic>            check one qualified draft
+folio lint --all                       check every binding main
 folio skill install <path>           download the matching Folio skill into <path>, remembering it
 folio skill install --no-enrich      install without global routing enrichment
 folio skill install                  re-run against the remembered path
 ```
+
+Lint always requires an explicit scope. With `--json`, a binding or qualified
+draft returns the lint result directly. `--all --json` returns an array of
+binding-qualified results so unavailable blocks and their errors remain
+attributable.
 
 ## Web
 
@@ -262,6 +268,10 @@ before repository actions.
 `skill.path` is global and `amendments.path` is the configurable global root.
 The CLI manages binding IDs and config version; aliases, descriptions, paths,
 GitHub values, and strategies are human-editable.
+
+`folio config skill <path>` and `folio config amendments <path>` update the
+two global paths. Binding fields are intentionally not scalar `folio config`
+keys: use the binding lifecycle commands or edit the validated YAML registry.
 
 Rename or remove a binding:
 

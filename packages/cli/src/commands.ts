@@ -23,10 +23,10 @@ import {
 	bindingAmendmentsPath,
 	bindingCheckoutPath,
 	type ConfigKey,
+	canonicalPath,
 	clearBindingContext,
 	ensureConfig,
 	getBindings,
-	getPath,
 	getRemote,
 	getStrategy,
 	hasRemote,
@@ -99,17 +99,19 @@ export function cmdBind(args: string[]): void {
 	if (config.bindings[alias])
 		throw new Error(`Binding '${alias}' already exists.`);
 	const abs = resolvePath(path ?? bindingCheckoutPath(alias));
+	const canonicalAbs = canonicalPath(abs);
+	const githubKey = github?.toLowerCase();
 	const duplicateGithub =
 		github &&
 		Object.entries(config.bindings).find(
-			([, binding]) => binding.github === github,
+			([, binding]) => binding.github?.toLowerCase() === githubKey,
 		);
 	if (duplicateGithub)
 		throw new Error(
 			`GitHub repo '${github}' is already bound as '${duplicateGithub[0]}'.`,
 		);
 	const duplicatePath = Object.entries(config.bindings).find(
-		([, binding]) => binding.path === abs,
+		([, binding]) => canonicalPath(binding.path) === canonicalAbs,
 	);
 	if (duplicatePath)
 		throw new Error(`Path '${abs}' is already bound as '${duplicatePath[0]}'.`);
@@ -126,6 +128,13 @@ export function cmdBind(args: string[]): void {
 	}
 	if (!existsSync(`${abs}/.git`))
 		throw new Error(`${abs} is not a git repository.`);
+	if (github) {
+		const origin = parseGitHubOrigin(abs);
+		if (!origin || origin.toLowerCase() !== githubKey)
+			throw new Error(
+				`${abs} is not a checkout of '${github}' (origin: ${origin ?? "not a GitHub repository"}).`,
+			);
+	}
 	const hasMain =
 		gitFile(["-C", abs, "rev-parse", "--verify", "main"], { quiet: true })
 			.exitCode === 0;
@@ -133,6 +142,12 @@ export function cmdBind(args: string[]): void {
 		throw new Error(
 			`${abs} has no 'main' branch. Folio uses main as published truth.`,
 		);
+	const worktreeConfig = gitFile(
+		["-C", abs, "config", "extensions.worktreeConfig", "true"],
+		{ quiet: true },
+	);
+	if (worktreeConfig.exitCode !== 0)
+		throw new Error(`Could not enable Git worktree configuration in ${abs}.`);
 	const inferred =
 		description ??
 		readIndexDescription(abs) ??
@@ -1211,32 +1226,10 @@ export function cmdConfig(args: string[]): void {
 		console.log(val || "");
 		return;
 	}
-
-	// Location is a bind-time decision — moving the checkout means re-binding.
-	if (key === "path" || key === "source") {
+	if (key !== "skill" && key !== "amendments")
 		throw new Error(
-			"path is set at bind time — run 'folio bind <owner/repo | path> [path]' to move the checkout.",
+			`'${key}' belongs to a binding. Use folio bind/binding commands or edit config.yml.`,
 		);
-	}
-
-	if (key === "strategy") {
-		if (value !== "merge" && value !== "pr") {
-			throw new Error("strategy must be 'merge' or 'pr'.");
-		}
-		if (value === "pr" && !hasRemote()) {
-			const origin = getPath() ? parseGitHubOrigin(baseRepo()) : null;
-			if (origin) {
-				throw new Error(
-					`strategy pr needs a remote. origin is github.com/${origin} — run 'folio config remote ${origin}', then retry.`,
-				);
-			}
-			throw new Error(
-				"strategy pr needs a remote — run 'folio config remote <owner/repo>' first.",
-			);
-		}
-	}
-
-	// Write key-value
 	writeConfig(key as ConfigKey, value);
 }
 
@@ -1420,13 +1413,19 @@ export function cmdLint(args: string[]): void {
 	ensureConfig();
 
 	const { topic, rest } = extractTopic(args, ["--spec"]);
+	const all = rest.includes("--all");
 	const json = rest.includes("--json");
 	const strict = rest.includes("--strict");
 	const specIdx = rest.indexOf("--spec");
 	const spec = specIdx >= 0 ? rest[specIdx + 1] : "folio";
 	if (specIdx >= 0 && !spec) {
 		throw new Error(
-			"Usage: folio lint [<topic>] [--spec folio] [--json] [--strict]",
+			"Usage: folio lint <binding>|<binding>:<topic>|--all [--spec folio] [--json] [--strict]",
+		);
+	}
+	if ((!topic && !all) || (topic && all)) {
+		throw new Error(
+			"Specify one binding or qualified draft, or use --all: folio lint <binding> | <binding>:<topic> | --all",
 		);
 	}
 
@@ -1446,14 +1445,7 @@ export function cmdLint(args: string[]): void {
 		if (!existsSync(`${storeDir}/.git`))
 			throw new Error(`[${qualified.alias}] unavailable: store is missing.`);
 		const result = lint(storeDir, { spec });
-		if (json)
-			console.log(
-				JSON.stringify(
-					{ alias: qualified.alias, target: topic, result },
-					null,
-					2,
-				),
-			);
+		if (json) console.log(JSON.stringify(result, null, 2));
 		else {
 			console.log(
 				`[${qualified.alias}] ${topic.includes(":") ? "draft" : "main"}`,

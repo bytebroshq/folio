@@ -21,6 +21,7 @@ export const BASE_REPO = `${STORE_DIR}/.main`;
 export type Strategy = "merge" | "pr";
 export type ConfigKey =
 	| "version"
+	| "amendments"
 	| "remote"
 	| "store"
 	| "web"
@@ -94,7 +95,7 @@ const LEGACY_KEYS = new Set([
 	"web",
 ]);
 
-function canonicalPath(path: string): string {
+export function canonicalPath(path: string): string {
 	const resolved = resolvePath(path);
 	try {
 		return realpathSync(resolved);
@@ -447,6 +448,7 @@ export function readConfig(key?: ConfigKey): string | null {
 		const config = loadConfig();
 		if (key === "version") return "2";
 		if (key === "skill") return config.skill.path;
+		if (key === "amendments") return config.amendments.path;
 		const binding = soleBinding();
 		if (binding && key === "remote") return binding.github;
 		if (binding && (key === "path" || key === "source")) return binding.path;
@@ -463,6 +465,8 @@ export function readConfig(key?: ConfigKey): string | null {
 export function writeConfig(key: ConfigKey, value: string): void {
 	const config = loadConfig();
 	if (key === "skill") config.skill.path = value ? resolvePath(value) : null;
+	else if (key === "amendments")
+		config.amendments.path = resolvePath(value || AMEND_DIR);
 	else if (
 		key === "path" ||
 		key === "source" ||

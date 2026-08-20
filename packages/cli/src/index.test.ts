@@ -159,6 +159,15 @@ describe("multi-binding configuration and lifecycle", () => {
 
 		const bound = runCliAtHome(["bind", "personal", "--path", repo], home);
 		expect(bound.exitCode).toBe(0);
+		expect(
+			runFile("git", [
+				"-C",
+				repo,
+				"config",
+				"--get",
+				"extensions.worktreeConfig",
+			]).stdout,
+		).toBe("true");
 		const configPath = join(home, ".config", "folio", "config.yml");
 		const config = readFileSync(configPath, "utf-8");
 		const id = config.match(/^\s+id: "(bnd_[0-9a-f]+)"$/m)?.[1] as string;
@@ -202,6 +211,65 @@ describe("multi-binding configuration and lifecycle", () => {
 		expect(existsSync(amendment)).toBe(true);
 		expect(existsSync(join(repo, ".git"))).toBe(true);
 		rmSync(repo, { recursive: true, force: true });
+	});
+
+	test("rejects duplicate and mismatched GitHub bindings before adoption", () => {
+		const home = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
+		homes.push(home);
+		const repo = localBlock("github");
+		expect(
+			runFile("git", [
+				"-C",
+				repo,
+				"remote",
+				"add",
+				"origin",
+				"git@github.com:Owner/Repo.git",
+			]).exitCode,
+		).toBe(0);
+		expect(
+			runCliAtHome(
+				["bind", "first", "--github", "Owner/Repo", "--path", repo],
+				home,
+			).exitCode,
+		).toBe(0);
+
+		const managedDuplicate = join(
+			home,
+			".config",
+			"folio",
+			"stores",
+			"bindings",
+			"second",
+		);
+		const duplicate = runCliAtHome(
+			["bind", "second", "--github", "owner/repo"],
+			home,
+		);
+		expect(duplicate.exitCode).not.toBe(0);
+		expect(error(duplicate)).toContain("already bound as 'first'");
+		expect(existsSync(managedDuplicate)).toBe(false);
+
+		const other = localBlock("other-github");
+		expect(
+			runFile("git", [
+				"-C",
+				other,
+				"remote",
+				"add",
+				"origin",
+				"git@github.com:someone/else.git",
+			]).exitCode,
+		).toBe(0);
+		const mismatch = runCliAtHome(
+			["bind", "wrong", "--github", "owner/wanted", "--path", other],
+			home,
+		);
+		expect(mismatch.exitCode).not.toBe(0);
+		expect(error(mismatch)).toContain("is not a checkout of 'owner/wanted'");
+
+		rmSync(repo, { recursive: true, force: true });
+		rmSync(other, { recursive: true, force: true });
 	});
 
 	test("maps every block and requires qualified, binding-scoped draft identities", () => {
@@ -299,11 +367,50 @@ describe("multi-binding configuration and lifecycle", () => {
 		expect(status.exitCode).toBe(1);
 		expect(output(status)).toContain("[personal]");
 		expect(error(status)).toContain("[ops] unavailable");
-		const lint = runCliAtHome(["lint"], home);
+		const lint = runCliAtHome(["lint", "--all"], home);
 		expect(lint.exitCode).toBe(1);
 		expect(output(lint)).toContain("[personal] main");
 		expect(error(lint)).toContain("[ops] unavailable");
 		rmSync(personal, { recursive: true, force: true });
+	});
+
+	test("requires explicit lint scope and keeps targeted JSON unwrapped", () => {
+		const home = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
+		homes.push(home);
+		const personal = localBlock("personal");
+		const operations = localBlock("operations");
+		expect(
+			runCliAtHome(["bind", "personal", "--path", personal], home).exitCode,
+		).toBe(0);
+		expect(
+			runCliAtHome(["bind", "ops", "--path", operations], home).exitCode,
+		).toBe(0);
+
+		const missing = runCliAtHome(["lint"], home);
+		expect(missing.exitCode).toBe(1);
+		expect(error(missing)).toContain("Specify one binding");
+		const ambiguous = runCliAtHome(["lint", "personal", "--all"], home);
+		expect(ambiguous.exitCode).toBe(1);
+
+		const targeted = runCliAtHome(["lint", "personal", "--json"], home);
+		expect(targeted.exitCode).toBe(0);
+		const direct = JSON.parse(output(targeted)) as Record<string, unknown>;
+		expect(direct).toHaveProperty("spec");
+		expect(direct).toHaveProperty("issues");
+		expect(direct).not.toHaveProperty("alias");
+		expect(direct).not.toHaveProperty("result");
+
+		const aggregate = runCliAtHome(["lint", "--all", "--json"], home);
+		expect(aggregate.exitCode).toBe(0);
+		const entries = JSON.parse(output(aggregate)) as Array<{
+			alias: string;
+			result: unknown;
+		}>;
+		expect(entries.map((entry) => entry.alias)).toEqual(["ops", "personal"]);
+		expect(entries.every((entry) => "result" in entry)).toBe(true);
+
+		rmSync(personal, { recursive: true, force: true });
+		rmSync(operations, { recursive: true, force: true });
 	});
 
 	test("bootstraps a legacy config through the command/update entry path", () => {
@@ -330,6 +437,24 @@ describe("multi-binding configuration and lifecycle", () => {
 			'id: "bnd_',
 		);
 		rmSync(repo, { recursive: true, force: true });
+	});
+
+	test("unknown commands do not create or migrate configuration", () => {
+		const freshHome = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
+		homes.push(freshHome);
+		const unknown = runCliAtHome(["notacommand"], freshHome);
+		expect(unknown.exitCode).not.toBe(0);
+		expect(existsSync(join(freshHome, ".config", "folio"))).toBe(false);
+
+		const legacyHome = mkdtempSync(join(tmpdir(), "folio-cli-home-"));
+		homes.push(legacyHome);
+		const configDir = join(legacyHome, ".config", "folio");
+		mkdirSync(configDir, { recursive: true });
+		const legacy = "source: /tmp/folio\nstore: git\nstrategy: merge\n";
+		const configPath = join(configDir, "config.yml");
+		writeFileSync(configPath, legacy, "utf-8");
+		expect(runCliAtHome(["notacommand"], legacyHome).exitCode).not.toBe(0);
+		expect(readFileSync(configPath, "utf-8")).toBe(legacy);
 	});
 
 	test("preserves malformed container-scalar config through a mutating CLI call", () => {
@@ -413,11 +538,12 @@ describe("multi-binding configuration and lifecycle", () => {
 			runCliAtHome(["bind", "custom", "--path", repo], home).exitCode,
 		).toBe(0);
 		const configPath = join(home, ".config", "folio", "config.yml");
-		const configured = readFileSync(configPath, "utf-8").replace(
-			/^ {2}path: ".*stores\/amendments"$/m,
-			`  path: ${JSON.stringify(customRoot)}`,
+		expect(
+			runCliAtHome(["config", "amendments", customRoot], home).exitCode,
+		).toBe(0);
+		expect(runCliAtHome(["config", "strategy", "pr"], home).exitCode).not.toBe(
+			0,
 		);
-		writeFileSync(configPath, configured, "utf-8");
 		expect(runCliAtHome(["draft", "custom:rooted"], home).exitCode).toBe(0);
 		expect(existsSync(join(customRoot, "bnd_"))).toBe(false);
 		const id = readFileSync(configPath, "utf-8").match(
@@ -439,7 +565,7 @@ describe("multi-binding configuration and lifecycle", () => {
 				"remote",
 				"add",
 				"origin",
-				"file:///definitely-missing-folio-remote",
+				"git@github.com:owner/cached.git",
 			]).exitCode,
 		).toBe(0);
 		expect(
@@ -461,6 +587,16 @@ describe("multi-binding configuration and lifecycle", () => {
 				["bind", "cached", "--github", "owner/cached", "--path", repo],
 				home,
 			).exitCode,
+		).toBe(0);
+		expect(
+			runFile("git", [
+				"-C",
+				repo,
+				"remote",
+				"set-url",
+				"origin",
+				"file:///definitely-missing-folio-remote",
+			]).exitCode,
 		).toBe(0);
 		const result = runCliAtHome(["status"], home, {
 			PATH: `${bin}:${process.env.PATH ?? ""}`,

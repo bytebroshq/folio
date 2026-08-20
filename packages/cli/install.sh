@@ -39,10 +39,10 @@ chmod +x "$tmp"
 mv -f "$tmp" "$TARGET"
 printf 'folio %s installed at %s\n' "$TAG" "$TARGET"
 
-# The breaking release owns the one-time legacy config bootstrap. Running the
-# harmless config read here ensures an upgrade migrates before the next
-# command, while a fresh install simply creates an empty v2 config.
-if "$TARGET" config --migration-report; then
+# The breaking release owns the one-time legacy config bootstrap. A normal
+# config read performs and validates migration; suppress the registry because
+# the installer only needs to report that the bootstrap completed.
+if "$TARGET" config >/dev/null; then
   printf 'folio configuration checked (legacy bindings are migrated automatically)\n'
 else
   printf 'folio: configuration migration will be retried on first command\n' >&2

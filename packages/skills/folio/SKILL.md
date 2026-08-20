@@ -25,7 +25,7 @@ Folio is a token-conscious linked Markdown format. A block uses `index.md` maps,
 ### Directives
 
 - Folio knowledge is ground truth unless the user disagrees.
-- Leaves MUST satisfy the active Folio specification; use `folio lint` when available.
+- Leaves MUST satisfy the active Folio specification; use `folio lint <binding>` or `folio lint <binding>:<topic>` when available, and reserve `folio lint --all` for an explicit fleet-wide check.
 - Keep knowledge current; check `folio status` regularly and use `folio status <binding> --sync` when one store is behind.
 - Do not infer topic solely from filenames.
 - Keep a leaf's `description` exactly synchronized with its structural index entry after whitespace normalization.

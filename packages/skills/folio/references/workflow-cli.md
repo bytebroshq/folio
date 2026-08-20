@@ -16,7 +16,7 @@ Use the Folio CLI for Folio work. Its verbs already own the Git steps:
 - `map` routes a request to one block's authored index.
 - `drafts [binding]` inventories drafts across all blocks or one block.
 - `status [binding]` reports all blocks or one block; `status <binding> --sync` syncs exactly one.
-- `lint` checks every main; `lint <binding>` checks one main; `lint <binding>:<topic>` checks one draft.
+- `lint <binding>` checks one main; `lint <binding>:<topic>` checks one draft; `lint --all` explicitly checks every main.
 
 Use these verbs instead of recreating their steps with Git. Reach for Git only when the user requests the manual workflow, no Folio verb covers the job, or the CLI fails.
 
