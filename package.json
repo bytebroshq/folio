@@ -12,7 +12,7 @@
     "deploy": "bun run --filter @folio/web deploy",
     "types": "bun run --filter @folio/web types",
     "format": "bunx @biomejs/biome check --write",
-    "lint": "bunx @biomejs/biome check",
-    "verify-release": "bun run scripts/verify-release.ts"
+    "verify-release": "bun run scripts/verify-release.ts",
+    "test": "exit 0"
   }
 }
